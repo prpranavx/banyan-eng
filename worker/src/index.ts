@@ -96,7 +96,7 @@ async function attachToSession(sessionId: string) {
       try {
         const codeContent = await page.evaluate(() => {
           const editor = document.querySelector('.CodeMirror, .monaco-editor, textarea');
-          return editor ? (editor as HTMLElement).innerText || '' : 'No code editor found';
+          return editor ? (editor as any).innerText || '' : 'No code editor found';
         })
         
         if (codeContent && codeContent !== 'No code editor found') {
@@ -127,7 +127,7 @@ async function sendMessageToBackend(sessionId: string, message: string, codeSnap
       body: JSON.stringify({ sessionId, message, codeSnapshot })
     })
     
-    const data = await response.json()
+    const data = await response.json() as { message: string }
     return data.message
   } catch (error) {
     console.error('Error sending message to backend:', error)

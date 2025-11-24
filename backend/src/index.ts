@@ -71,7 +71,6 @@ ${codeSnapshot ? `Current code:\n${codeSnapshot}` : ''}`
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
-      temperature: 0.7,
       max_tokens: 500
     })
 
@@ -121,7 +120,6 @@ Respond with valid JSON only.`
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: evaluationPrompt }],
-      temperature: 0.3,
       response_format: { type: 'json_object' }
     })
 
