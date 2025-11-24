@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { UserButton } from '@clerk/clerk-react'
+import { UserButton, useAuth } from '@clerk/clerk-react'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'
 
@@ -12,12 +12,17 @@ interface Session {
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [newSessionId, setNewSessionId] = useState<string | null>(null)
+  const { getToken } = useAuth()
 
   const createSession = async () => {
     try {
+      const token = await getToken()
       const response = await fetch(`${BACKEND_URL}/api/generate-session`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       })
       const data = await response.json()
       setNewSessionId(data.sessionId)
