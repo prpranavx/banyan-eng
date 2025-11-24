@@ -8,9 +8,14 @@ import type { Session, SendMessageRequest, EvaluateRequest, EvaluationResult } f
 const app = express()
 const PORT = process.env.PORT || 3000
 
-app.use(cors())
+// Allow CORS from any origin (injected scripts from proxy will call this)
+app.use(cors({
+  origin: '*',
+  credentials: false
+}))
 app.use(express.json())
 
+console.log('Initializing OpenAI with key:', process.env.OPENAI_API_KEY ? 'present' : 'missing')
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 })
@@ -40,21 +45,32 @@ const requireAuth = async (req: express.Request, res: express.Response, next: ex
 }
 
 app.post('/api/generate-session', requireAuth, (req, res) => {
+  const { codingPlatformUrl }: { codingPlatformUrl?: string } = req.body
   const sessionId = uuidv4()
   const session: Session = {
     sessionId,
     messages: [],
     createdAt: new Date().toISOString(),
-    status: 'active'
+    status: 'active',
+    codingPlatformUrl
   }
   sessions.set(sessionId, session)
-  
-  console.log(`Created new session: ${sessionId}`)
-  res.json({ sessionId })
+
+  console.log(`Created new session: ${sessionId}${codingPlatformUrl ? ` for ${codingPlatformUrl}` : ''}`)
+
+  // If there's a coding platform URL, generate proxy URL
+  if (codingPlatformUrl) {
+    const workerUrl = process.env.WORKER_URL || 'http://localhost:3001'
+    const candidateLink = `${workerUrl}/proxy/${sessionId}`
+    res.json({ sessionId, candidateLink })
+  } else {
+    res.json({ sessionId, candidateLink: `${req.protocol}://${req.get('host')}/candidate/${sessionId}` })
+  }
 })
 
 app.post('/api/send-message', async (req, res) => {
   try {
+    console.log('Received send-message request:', { sessionId: req.body.sessionId, messageLength: req.body.message?.length, codeSnapshotLength: req.body.codeSnapshot?.length })
     const { sessionId, message, codeSnapshot }: SendMessageRequest = req.body
 
     if (!sessionId || !message) {
@@ -91,8 +107,9 @@ ${codeSnapshot ? `Current code:\n${codeSnapshot}` : ''}`
       }))
     ]
 
+    console.log('Calling OpenAI for chat completion...')
     const completion = await openai.chat.completions.create({
-      model: 'gpt-5',
+      model: 'gpt-4',
       messages,
       max_completion_tokens: 500
     })
@@ -140,8 +157,9 @@ ${transcript}
 
 Respond with valid JSON only.`
 
+    console.log('Calling OpenAI for evaluation...')
     const completion = await openai.chat.completions.create({
-      model: 'gpt-5',
+      model: 'gpt-4',
       messages: [{ role: 'user', content: evaluationPrompt }],
       response_format: { type: 'json_object' }
     })
@@ -169,12 +187,17 @@ Respond with valid JSON only.`
 app.get('/api/sessions/:sessionId', (req, res) => {
   const { sessionId } = req.params
   const session = sessions.get(sessionId)
-  
+
   if (!session) {
     return res.status(404).json({ error: 'Session not found' })
   }
-  
+
   res.json(session)
+})
+
+app.get('/api/sessions', (req, res) => {
+  const sessionsArray = Array.from(sessions.values())
+  res.json(sessionsArray)
 })
 
 app.get('/health', (req, res) => {

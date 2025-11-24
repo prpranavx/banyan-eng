@@ -9,6 +9,11 @@ export interface Session {
   messages: Message[]
   createdAt: string
   status: 'active' | 'completed'
+  codingPlatformUrl?: string
+}
+
+export interface CreateSessionRequest {
+  codingPlatformUrl?: string
 }
 
 export interface SendMessageRequest {

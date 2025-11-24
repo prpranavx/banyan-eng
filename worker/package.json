@@ -3,14 +3,18 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "node --import tsx/esm src/index.ts",
+    "dev:tsx": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "express": "^4.21.2",
+    "http-proxy-middleware": "^2.0.9",
     "playwright": "^1.40.0"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^20.10.5",
     "tsx": "^4.7.0",
     "typescript": "^5.2.2"

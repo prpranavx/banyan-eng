@@ -7,40 +7,87 @@ interface Session {
   sessionId: string
   createdAt: string
   status: 'active' | 'completed'
+  codingPlatformUrl?: string
 }
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [newSessionId, setNewSessionId] = useState<string | null>(null)
+  const [candidateLink, setCandidateLink] = useState('')
+  const [codingPlatformUrl, setCodingPlatformUrl] = useState('')
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [isEndingInterview, setIsEndingInterview] = useState<string | null>(null)
   const { getToken } = useAuth()
 
   const createSession = async () => {
+    if (isCreatingSession) return
+
+    setIsCreatingSession(true)
     try {
       const token = await getToken()
       const response = await fetch(`${BACKEND_URL}/api/generate-session`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
-        }
+        },
+        body: JSON.stringify({ codingPlatformUrl: codingPlatformUrl.trim() || undefined })
       })
       const data = await response.json()
       setNewSessionId(data.sessionId)
-      
+
       const newSession: Session = {
         sessionId: data.sessionId,
         createdAt: new Date().toISOString(),
-        status: 'active'
+        status: 'active',
+        codingPlatformUrl: data.codingPlatformUrl
       }
       setSessions([newSession, ...sessions])
+      setCodingPlatformUrl('') // Reset the input
+
+      // Update the candidate link display
+      if (data.candidateLink) {
+        setCandidateLink(data.candidateLink)
+      }
     } catch (error) {
       console.error('Failed to create session:', error)
+    } finally {
+      setIsCreatingSession(false)
     }
   }
 
-  const candidateLink = newSessionId 
-    ? `${window.location.origin}/candidate/${newSessionId}`
-    : ''
+
+  const endInterview = async (sessionId: string) => {
+    if (isEndingInterview) return
+
+    setIsEndingInterview(sessionId)
+    try {
+      const token = await getToken()
+      const response = await fetch(`${BACKEND_URL}/api/evaluate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ sessionId })
+      })
+      const evaluation = await response.json()
+
+      // Update session status
+      setSessions(sessions.map(s =>
+        s.sessionId === sessionId
+          ? { ...s, status: 'completed' }
+          : s
+      ))
+
+      // Show evaluation results
+      alert(`Interview Complete!\n\nScore: ${evaluation.score}/100\nSummary: ${evaluation.summary}`)
+    } catch (error) {
+      console.error('Failed to evaluate interview:', error)
+    } finally {
+      setIsEndingInterview(null)
+    }
+  }
 
   const activeSessions = sessions.filter(s => s.status === 'active')
   const pastSessions = sessions.filter(s => s.status === 'completed')
@@ -59,11 +106,29 @@ export default function Dashboard() {
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           <div className="mb-8">
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Coding Platform URL (optional)
+              </label>
+              <input
+                type="url"
+                value={codingPlatformUrl}
+                onChange={(e) => setCodingPlatformUrl(e.target.value)}
+                placeholder="https://coderpad.io/... or https://hackerrank.com/..."
+                className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isCreatingSession}
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Enter a CoderPad, HackerRank, or other coding platform link to monitor this session
+              </p>
+            </div>
+
             <button
               onClick={createSession}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
+              disabled={isCreatingSession}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
             >
-              New Interview
+              {isCreatingSession ? 'Creating...' : 'New Interview'}
             </button>
             
             {newSessionId && (
@@ -121,10 +186,17 @@ export default function Dashboard() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <a
                             href={`/candidate/${session.sessionId}`}
-                            className="text-blue-600 hover:text-blue-900"
+                            className="text-blue-600 hover:text-blue-900 mr-4"
                           >
                             View
                           </a>
+                          <button
+                            onClick={() => endInterview(session.sessionId)}
+                            disabled={isEndingInterview === session.sessionId}
+                            className="text-red-600 hover:text-red-900 disabled:text-gray-400"
+                          >
+                            {isEndingInterview === session.sessionId ? 'Evaluating...' : 'End Interview'}
+                          </button>
                         </td>
                       </tr>
                     ))}
