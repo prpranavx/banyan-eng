@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { v4 as uuidv4 } from 'uuid'
 import OpenAI from 'openai'
+import { clerkClient } from '@clerk/clerk-sdk-node'
 import type { Session, SendMessageRequest, EvaluateRequest, EvaluationResult } from './types.js'
 
 const app = express()
@@ -16,7 +17,29 @@ const openai = new OpenAI({
 
 const sessions = new Map<string, Session>()
 
-app.post('/api/generate-session', (req, res) => {
+const requireAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const authHeader = req.headers.authorization
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized - Missing token' })
+    }
+
+    const token = authHeader.substring(7)
+    const decoded = await clerkClient.verifyToken(token)
+    
+    if (!decoded) {
+      return res.status(401).json({ error: 'Unauthorized - Invalid token' })
+    }
+
+    (req as any).auth = decoded
+    next()
+  } catch (error) {
+    console.error('Auth error:', error)
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+}
+
+app.post('/api/generate-session', requireAuth, (req, res) => {
   const sessionId = uuidv4()
   const session: Session = {
     sessionId,
@@ -69,9 +92,9 @@ ${codeSnapshot ? `Current code:\n${codeSnapshot}` : ''}`
     ]
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5',
       messages,
-      max_tokens: 500
+      max_completion_tokens: 500
     })
 
     const assistantMessage = completion.choices[0]?.message?.content || 'I apologize, I could not generate a response.'
@@ -89,7 +112,7 @@ ${codeSnapshot ? `Current code:\n${codeSnapshot}` : ''}`
   }
 })
 
-app.post('/api/evaluate', async (req, res) => {
+app.post('/api/evaluate', requireAuth, async (req, res) => {
   try {
     const { sessionId }: EvaluateRequest = req.body
 
@@ -118,7 +141,7 @@ ${transcript}
 Respond with valid JSON only.`
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5',
       messages: [{ role: 'user', content: evaluationPrompt }],
       response_format: { type: 'json_object' }
     })
