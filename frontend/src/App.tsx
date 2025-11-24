@@ -1,8 +1,8 @@
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import Dashboard from './pages/Dashboard'
-import SignInPage from './pages/SignInPage'
-import CandidateInterview from './pages/CandidateInterview'
+import Dashboard from './pages/Dashboard.tsx'
+import SignInPage from './pages/SignInPage.tsx'
+import CandidateInterview from './pages/CandidateInterview.tsx'
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
