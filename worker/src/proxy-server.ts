@@ -2,8 +2,66 @@ import express from 'express'
 import { createProxyMiddleware } from 'http-proxy-middleware'
 import { getOrCreateBrowserSession, cleanup } from './browser-session.js'
 import { generateChatInjectionScript } from './inject-chat.js'
+import { generateNavigationGuardScript } from './navigation-guard.js'
 
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || '3001')
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean)
+
+type SessionParams = {
+  sessionId?: string
+  'sessionId*'?: string
+}
+
+const getSessionParam = (req: express.Request): string => {
+  const params = req.params as SessionParams
+  return params.sessionId ?? params['sessionId*'] ?? ''
+}
+
+const escapeForRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const META_REFRESH_REGEX = /<meta[^>]+http-equiv=["']?refresh["']?[^>]*>/gi
+const BASE_TAG_REGEX = /<base\s+[^>]*href=["']([^"']+)["'][^>]*>/gi
+
+function removeAutoRedirectMeta(html: string) {
+  if (!html) {
+    return html
+  }
+  return html.replace(META_REFRESH_REGEX, '<!-- removed meta refresh to preserve proxy -->')
+}
+
+function removeConflictingBaseTags(html: string, targetOrigin: string) {
+  if (!html || !targetOrigin) {
+    return html
+  }
+  return html.replace(BASE_TAG_REGEX, (_match, href) => {
+    if (!href) return _match
+    const normalizedHref = href.toLowerCase()
+    const normalizedOrigin = targetOrigin.toLowerCase()
+    if (normalizedHref.startsWith(normalizedOrigin)) {
+      return '<!-- removed base tag to preserve proxy origin -->'
+    }
+    return _match
+  })
+}
+
+function setCorsHeaders(req: express.Request, res: express.Response) {
+  const origin = req.headers.origin
+  const allowAll = ALLOWED_ORIGINS.includes('*')
+  const isAllowedOrigin = origin && (allowAll || ALLOWED_ORIGINS.includes(origin))
+
+  if (isAllowedOrigin && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+  } else if (allowAll) {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+  }
+
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
+  res.setHeader('Vary', 'Origin')
+}
 
 export function createProxyServer() {
   const app = express()
@@ -16,14 +74,21 @@ export function createProxyServer() {
   // Proxy API calls to backend (avoids CSP issues)
   // This must come BEFORE the main proxy route to match first
   app.use('/proxy/:sessionId/api', async (req, res, next) => {
-    const { sessionId } = req.params
-    const uuidMatch = sessionId.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
-    const cleanSessionId = uuidMatch ? uuidMatch[1] : sessionId
+    setCorsHeaders(req, res)
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end()
+    }
+
+    const sessionParam = getSessionParam(req)
+    const uuidMatch = sessionParam.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
+    const cleanSessionId = uuidMatch ? uuidMatch[1] : sessionParam
+    const escapedSessionParam = escapeForRegex(sessionParam)
     
     // Extract API path (e.g., /send-message)
     const originalPath = req.path
     // Remove /proxy/{sessionId}/api prefix, keep the rest (e.g., /send-message)
-    const apiPath = originalPath.replace(new RegExp(`^/proxy/${req.params.sessionId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/api`), '') || '/'
+    const apiPath = originalPath.replace(new RegExp(`^/proxy/${escapedSessionParam}/api`), '') || '/'
     
     console.log(`Proxying API call: path=${apiPath}, original=${originalPath}, session=${cleanSessionId}`)
     
@@ -35,7 +100,7 @@ export function createProxyServer() {
       changeOrigin: true,
       pathRewrite: function(path, req) {
         // Rewrite /proxy/{sessionId}/api/send-message -> /api/send-message
-        const rewritten = path.replace(new RegExp(`^/proxy/${req.params.sessionId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/api`), '/api')
+        const rewritten = path.replace(new RegExp(`^/proxy/${escapedSessionParam}/api`), '/api')
         console.log(`Path rewrite: ${path} -> ${rewritten}`)
         return rewritten
       },
@@ -59,14 +124,15 @@ export function createProxyServer() {
   // Main proxy endpoint - proxies all requests and injects chat script
   app.use('/proxy/:sessionId*', async (req, res, next) => {
     // Extract sessionId - ensure we only get the UUID part (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-    let sessionId = req.params.sessionId
+    const sessionParam = getSessionParam(req)
+    let sessionId = sessionParam
     // UUIDs are 36 characters with dashes, extract just that part
     const uuidMatch = sessionId.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
     if (uuidMatch) {
       sessionId = uuidMatch[1]
     }
     
-    console.log(`Proxying request for session: ${sessionId}, original param: ${req.params.sessionId}, path: ${req.path}`)
+    console.log(`Proxying request for session: ${sessionId}, original param: ${sessionParam}, path: ${req.path}`)
     
     try {
       // Get target URL from session first
@@ -82,7 +148,7 @@ export function createProxyServer() {
       const targetUrl = new URL(session.codingPlatformUrl)
       
       // Extract the path after /proxy/:sessionId
-      const proxyPath = `/proxy/${req.params.sessionId}`
+      const proxyPath = `/proxy/${sessionParam}`
       const remainingPath = req.path.startsWith(proxyPath) 
         ? req.path.substring(proxyPath.length) || '/'
         : '/'
@@ -94,7 +160,7 @@ export function createProxyServer() {
         changeOrigin: true,
         ws: true,
         pathRewrite: {
-          [`^/proxy/${req.params.sessionId}`]: fullPath
+          [`^/proxy/${sessionParam}`]: fullPath
         },
         onProxyRes: (proxyRes, req, res) => {
           // Inject chat script into HTML responses only
@@ -109,8 +175,10 @@ export function createProxyServer() {
             const originalEnd = res.end.bind(res)
             
             // Prevent the proxy from writing directly
-            res.write = () => true
-            res.end = () => true
+            const noopWrite = (() => true) as typeof res.write
+            const noopEnd = ((..._args: unknown[]) => res) as typeof res.end
+            res.write = noopWrite
+            res.end = noopEnd
             
             // Collect response body
             proxyRes.on('data', (chunk: Buffer) => {
@@ -120,6 +188,20 @@ export function createProxyServer() {
             proxyRes.on('end', () => {
               try {
                 let html = body.toString('utf-8')
+                html = removeAutoRedirectMeta(html)
+                html = removeConflictingBaseTags(html, targetUrl.origin)
+                
+                if (!html.includes('data-ai-nav-guard')) {
+                  const navGuardScript = generateNavigationGuardScript(sessionParam, session.codingPlatformUrl)
+                  const guardTag = `<script data-ai-nav-guard>${navGuardScript}</script>`
+                  if (html.includes('<head>')) {
+                    html = html.replace('<head>', `<head>${guardTag}`)
+                  } else if (html.toLowerCase().includes('<head')) {
+                    html = html.replace(/<head[^>]*>/i, match => `${match}${guardTag}`)
+                  } else {
+                    html = guardTag + html
+                  }
+                }
                 
                 // Inject chat script if not already present
                 if (!html.includes('ai-interview-chat')) {

@@ -6,7 +6,8 @@
     "dev": "node --import tsx/esm src/index.ts",
     "dev:tsx": "tsx src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "postinstall": "node ./scripts/install-playwright.mjs"
   },
   "dependencies": {
     "express": "^4.21.2",

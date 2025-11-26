@@ -1,18 +1,22 @@
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000'
-const WORKER_URL = process.env.WORKER_URL || 'http://localhost:3001'
+const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '')
+const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:3001').replace(/\/$/, '')
+
+const escapeForTemplateLiteral = (value: string) =>
+  value.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$')
 
 export function generateChatInjectionScript(sessionId: string): string {
-  // Use proxy URL for API calls to avoid CSP issues
-  // All requests go through same origin (worker proxy)
-  // Get current origin from window.location to avoid hardcoding
-  const apiUrl = `/proxy/${sessionId}/api`
-  const apiUrlEscaped = apiUrl.replace(/`/g, '\\`').replace(/\$/g, '\\$')
+  const apiBasePath = `/proxy/${sessionId}/api`
+
+  const apiBasePathEscaped = escapeForTemplateLiteral(apiBasePath)
+  const workerOriginEscaped = escapeForTemplateLiteral(WORKER_URL)
+  const backendOriginEscaped = escapeForTemplateLiteral(BACKEND_URL)
   
   return `(function() {
   try {
     console.log('[AI Assistant] Script loaded, initializing...');
     console.log('[AI Assistant] Session ID:', '${sessionId}');
-    console.log('[AI Assistant] API URL:', '${apiUrlEscaped}');
+    console.log('[AI Assistant] Worker origin:', '${workerOriginEscaped}');
+    console.log('[AI Assistant] Backend origin:', '${backendOriginEscaped}');
     
     // Test: Try to create a visible test element first
     const testDiv = document.createElement('div');
@@ -23,8 +27,32 @@ export function generateChatInjectionScript(sessionId: string): string {
     setTimeout(() => testDiv.remove(), 3000);
     
     const SESSION_ID = '${sessionId}';
-    const API_URL = '${apiUrlEscaped}';
+    const WORKER_ORIGIN = '${workerOriginEscaped}';
+    const BACKEND_ORIGIN = '${backendOriginEscaped}';
+    const API_BASE_PATH = '${apiBasePathEscaped}';
     
+    const resolveApiUrl = () => {
+      // Prefer worker proxy so sessionId stays in URL and cookies stay scoped
+      if (WORKER_ORIGIN) {
+        if (window.location.origin === WORKER_ORIGIN) {
+          return API_BASE_PATH;
+        }
+        if (window.location.protocol === 'https:' && !WORKER_ORIGIN.startsWith('https:')) {
+          console.warn('[AI Assistant] Mixed-content risk: worker origin is not HTTPS');
+        }
+        console.warn('[AI Assistant] Page is running on', window.location.origin, 'but worker origin is', WORKER_ORIGIN, '- using absolute worker URL for API calls.');
+        return WORKER_ORIGIN + API_BASE_PATH;
+      }
+      
+      if (BACKEND_ORIGIN) {
+        console.warn('[AI Assistant] WORKER_URL not set; falling back to backend origin which requires permissive CORS.');
+        return BACKEND_ORIGIN + '/api';
+      }
+      
+      console.warn('[AI Assistant] No worker or backend origin defined; defaulting to relative path (may fail).');
+      return API_BASE_PATH;
+    };
+
     function initChat() {
     console.log('[AI Assistant] initChat called');
     
@@ -153,7 +181,7 @@ export function generateChatInjectionScript(sessionId: string): string {
       }
 
       // Use relative URL (same origin) to avoid CSP issues
-      const apiEndpoint = API_URL + '/send-message';
+      const apiEndpoint = resolveApiUrl() + '/send-message';
       console.log('[AI Assistant] Sending message to:', apiEndpoint);
       console.log('[AI Assistant] Session ID:', SESSION_ID);
       

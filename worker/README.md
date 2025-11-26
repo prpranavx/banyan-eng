@@ -28,15 +28,20 @@ WORKER_URL=http://localhost:3001
 # Backend API URL (for chat API calls)
 BACKEND_URL=http://localhost:3000
 
+# Allowed browser origins for API calls (comma-separated list)
+ALLOWED_ORIGINS=*
+
 # Playwright browser settings
-WORKER_HEADLESS=true
+# Set WORKER_HEADLESS=false locally if you want to see the browser window.
+WORKER_HEADLESS=false
+WORKER_CHROMIUM_ARGS=
 ```
 
 ### Installation
 
 ```bash
 npm install
-npx playwright install chromium
+# postinstall automatically runs: npx playwright install --with-deps chromium
 ```
 
 ### Development
@@ -63,10 +68,12 @@ npm start
 
 ### Railway / Fly.io / Render
 
-1. Set `WORKER_URL` to your production domain
-2. Set `BACKEND_URL` to your backend API URL
-3. Ensure Playwright browsers are installed (usually handled automatically)
-4. Deploy worker on port 3001 (or configure via `WORKER_PORT`)
+1. Set `WORKER_URL` to your production domain (Railway provides an HTTPS URL out of the box).
+2. Set `BACKEND_URL` to your backend API URL (can point back to Railway or another host).
+3. Ensure `WORKER_HEADLESS=true` (container environments do not have a display).
+4. Configure `ALLOWED_ORIGINS` with the domains that will embed the chat (e.g. `https://app.coderpad.io`).
+5. Optional: add extra Chromium flags via `WORKER_CHROMIUM_ARGS` (comma-separated) if needed.
+6. Deploy worker on port 3001 (or configure via `WORKER_PORT`). Playwright binaries are installed during `npm install`.
 
 ### Scaling
 

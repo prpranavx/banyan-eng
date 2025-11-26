@@ -64,13 +64,15 @@ Backend runs on http://localhost:3000
 
 ```bash
 cd worker
-npm install
-npx playwright install chromium
+npm install # automatically installs Playwright browsers
 ```
 
 Create `worker/.env`:
 ```
 BACKEND_URL=http://localhost:3000
+WORKER_URL=http://localhost:3001
+ALLOWED_ORIGINS=*
+WORKER_HEADLESS=false
 PLAYWRIGHT_BYPASS_CSP=true
 ```
 
@@ -78,6 +80,8 @@ Run the worker:
 ```bash
 npm run dev
 ```
+
+> For CoderPad/HackerRank (HTTPS origins), deploy the worker behind HTTPS (Railway, Render, Fly, etc.). Set `WORKER_URL` to that public HTTPS URL, tighten `ALLOWED_ORIGINS` (comma-separated list), and set `WORKER_HEADLESS=true` so Playwright can run in container environments.
 
 ## Features
 
@@ -145,7 +149,28 @@ npm start
 
 ### Worker
 - `BACKEND_URL` - Backend API URL for syncing
+- `WORKER_URL` - Public HTTPS origin that hosts `/proxy/:sessionId`
+- `ALLOWED_ORIGINS` - Comma-separated list of allowed browser origins (default `*`)
+- `WORKER_HEADLESS` - `true` in hosted environments (set `false` for local interactive debugging)
+- `WORKER_CHROMIUM_ARGS` - Optional comma-separated list of extra Chromium launch flags
 - `PLAYWRIGHT_BYPASS_CSP` - Enable CSP bypass (set to "true")
+
+## Railway deployment tips
+
+1. Create two services (backend + worker) in the same Railway project.
+2. For the worker service:
+   - Install command: `npm install`
+   - Build command: `npm run build`
+   - Start command: `npm start`
+   - `npm install` automatically runs the Playwright installer (with Linux deps when available).
+   - Env vars: `BACKEND_URL=https://<backend>.railway.app`, `WORKER_URL=https://<worker>.railway.app`, `WORKER_HEADLESS=true`, `ALLOWED_ORIGINS=https://app.coderpad.io`.
+3. For the backend service:
+   - Install command: `npm install`
+   - Build command: `npm run build`
+   - Start command: `npm start`
+   - Env vars: `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `PORT=3000`, `WORKER_URL=https://<worker>.railway.app`.
+4. Frontend:
+   - Deploy on Vercel with `VITE_BACKEND_URL` pointing to the Railway backend and `VITE_CLERK_PUBLISHABLE_KEY` configured.
 
 ## Technology Stack
 

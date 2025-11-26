@@ -15,12 +15,26 @@ const activeSessions = new Map<string, BrowserSession>()
 // Shared browser instance (reused across sessions for efficiency)
 let sharedBrowser: Browser | null = null
 
+const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--disable-setuid-sandbox']
+const rawHeadlessValue =
+  process.env.WORKER_HEADLESS ??
+  process.env.PLAYWRIGHT_HEADLESS ??
+  (process.env.NODE_ENV === 'production' ? 'true' : 'false')
+const rawHeadless = rawHeadlessValue.toString().toLowerCase()
+const HEADLESS_MODE = rawHeadless !== 'false'
+const extraArgs = (process.env.WORKER_CHROMIUM_ARGS || '')
+  .split(',')
+  .map(arg => arg.trim())
+  .filter(Boolean)
+const CHROMIUM_ARGS = Array.from(new Set([...DEFAULT_CHROMIUM_ARGS, ...extraArgs]))
+
 async function getSharedBrowser(): Promise<Browser> {
   if (!sharedBrowser) {
     sharedBrowser = await chromium.launch({
-      headless: false, // Show browser so candidate can interact
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      headless: HEADLESS_MODE,
+      args: CHROMIUM_ARGS
     })
+    console.log(`Playwright Chromium launched (headless=${HEADLESS_MODE}) with args: ${CHROMIUM_ARGS.join(' ')}`)
   }
   return sharedBrowser
 }
