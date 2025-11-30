@@ -3,5 +3,4 @@ builder = "RAILPACK"
 buildCommand = "npm run build"
 
 [deploy]
-preDeployCommand = "npx playwright install-deps chromium && npx playwright install chromium"
 startCommand = "npm start"

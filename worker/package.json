@@ -6,7 +6,7 @@
     "dev": "node --import tsx/esm src/index.ts",
     "dev:tsx": "tsx src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "./scripts/start-worker.sh",
     "postinstall": "node ./scripts/install-playwright.mjs"
   },
   "dependencies": {
