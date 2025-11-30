@@ -162,6 +162,30 @@ export function createProxyServer() {
         pathRewrite: {
           [`^/proxy/${sessionParam}`]: fullPath
         },
+        onProxyReq: (proxyReq, req, res) => {
+          // Forward important headers to avoid detection
+          if (req.headers['user-agent']) {
+            proxyReq.setHeader('User-Agent', req.headers['user-agent'] as string)
+          }
+          if (req.headers['referer']) {
+            proxyReq.setHeader('Referer', req.headers['referer'] as string)
+          }
+          if (req.headers['accept']) {
+            proxyReq.setHeader('Accept', req.headers['accept'] as string)
+          }
+          if (req.headers['accept-language']) {
+            proxyReq.setHeader('Accept-Language', req.headers['accept-language'] as string)
+          }
+          if (req.headers['accept-encoding']) {
+            proxyReq.setHeader('Accept-Encoding', req.headers['accept-encoding'] as string)
+          }
+          // Forward cookies if present
+          if (req.headers['cookie']) {
+            proxyReq.setHeader('Cookie', req.headers['cookie'] as string)
+          }
+          // Set referer to make it look like direct access
+          proxyReq.setHeader('Referer', targetUrl.origin + '/')
+        },
         onProxyRes: (proxyRes, req, res) => {
           // Inject chat script into HTML responses only
           const contentType = proxyRes.headers['content-type'] || ''
