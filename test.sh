@@ -70,51 +70,45 @@ npm run dev > ../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 cd ..
 
-echo "🤖 Starting Worker..."
-cd worker
-load_env "../worker/.env"
-npm run dev > ../logs/worker.log 2>&1 &
-WORKER_PID=$!
-cd ..
-
 # Wait for services to start
 echo "⏳ Waiting for services to initialize..."
 sleep 5
 
 # Check services
 check_service "Backend" "http://localhost:3000/health"
-check_service "Frontend" "http://localhost:5001" # Vite might change port
-check_service "Worker" "http://localhost:3001/health"
+
+# Check frontend (Vite may use 5001 if 5000 is occupied)
+if curl -s "http://localhost:5000" > /dev/null 2>&1; then
+  check_service "Frontend" "http://localhost:5000"
+  FRONTEND_PORT=5000
+elif curl -s "http://localhost:5001" > /dev/null 2>&1; then
+  check_service "Frontend" "http://localhost:5001"
+  FRONTEND_PORT=5001
+else
+  echo -e "\n${RED}❌ Frontend failed to start${NC}"
+  FRONTEND_PORT=5000
+fi
 
 echo ""
 echo "${GREEN}🎉 All services started successfully!${NC}"
 echo ""
 echo "${BLUE}📊 Service URLs:${NC}"
 echo "  • Backend API:  http://localhost:3000"
-echo "  • Frontend UI:  http://localhost:5001"
-echo "  • Worker Proxy: http://localhost:3001"
+echo "  • Frontend UI:  http://localhost:${FRONTEND_PORT:-5000}"
 echo ""
 echo "${BLUE}🌐 Environment:${NC}"
-echo "  • Worker URL:   ${WORKER_URL:-http://localhost:3001}"
 echo "  • Backend URL:  ${BACKEND_URL:-http://localhost:3000}"
-echo "  • Allowed Origins: ${ALLOWED_ORIGINS:-*}"
 echo ""
 echo "${BLUE}🧪 Test Commands:${NC}"
-echo "  • Create session:"
-echo "    curl -X POST http://localhost:3000/api/generate-session \\"
-echo "      -H 'Content-Type: application/json' \\"
-echo "      -d '{\"codingPlatformUrl\":\"https://app.coderpad.io/sandbox\"}'"
+echo "  • Create session (requires Clerk auth via frontend UI):"
+echo "    Open http://localhost:${FRONTEND_PORT:-5000} and sign in to create a session"
 echo ""
 echo "  • Check logs:"
 echo "    tail -f logs/backend.log"
 echo "    tail -f logs/frontend.log"
-echo "    tail -f logs/worker.log"
-echo ""
-echo "  • Full test:"
-echo "    ./test-interview.sh"
 echo ""
 echo "${YELLOW}⚠️  Press Ctrl+C to stop all services${NC}"
 
 # Wait for user interrupt
-trap "echo -e '\n${YELLOW}🛑 Stopping services...${NC}'; kill $BACKEND_PID $FRONTEND_PID $WORKER_PID 2>/dev/null || true; exit 0" INT
+trap "echo -e '\n${YELLOW}🛑 Stopping services...${NC}'; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true; exit 0" INT
 wait

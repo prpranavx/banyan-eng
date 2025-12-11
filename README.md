@@ -4,16 +4,16 @@ A full-stack MVP for conducting AI-assisted technical interviews with real-time 
 
 ## Architecture
 
-This project consists of three independent components:
+This project consists of two independent components:
 
 - **Frontend** (`/frontend`): React + Vite + Clerk authentication dashboard
 - **Backend** (`/backend`): Express API server with OpenAI integration
-- **Worker** (`/worker`): Playwright automation for code editor monitoring
 
 ## Prerequisites
 
 - Node.js 20+
 - npm or yarn
+- PostgreSQL database (use Railway Postgres or local PostgreSQL)
 - OpenAI API key
 - Clerk account (for authentication)
 
@@ -26,11 +26,18 @@ cd frontend
 npm install
 ```
 
-Create `frontend/.env`:
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+
+Update `frontend/.env` with your values:
 ```
 VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 VITE_BACKEND_URL=http://localhost:3000
 ```
+
+**Note**: The `VITE_` prefix is required for Vite to expose these variables to the frontend.
 
 Run the frontend:
 ```bash
@@ -46,42 +53,45 @@ cd backend
 npm install
 ```
 
-Create `backend/.env`:
-```
-OPENAI_API_KEY=your_openai_api_key
-CLERK_SECRET_KEY=your_clerk_secret_key
-PORT=3000
+#### Database Setup
+
+1. Set up PostgreSQL database (see [backend/DATABASE_SETUP.md](backend/DATABASE_SETUP.md) for Railway Postgres setup)
+2. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+3. Update `backend/.env` with your values:
+   ```
+   DATABASE_URL=postgresql://user:password@host:port/database
+   OPENAI_API_KEY=your_openai_api_key
+   CLERK_SECRET_KEY=your_clerk_secret_key
+   PORT=3000
+   FRONTEND_URL=http://localhost:5000
+   ```
+
+#### Run Database Migration
+
+Before starting the backend, run the database migration:
+
+```bash
+cd backend
+npm run migrate
 ```
 
-Run the backend:
+This creates all required database tables. The migration is idempotent (safe to run multiple times).
+
+#### Start Backend
+
 ```bash
 npm run dev
 ```
 
 Backend runs on http://localhost:3000
 
-### 3. Worker Setup
-
-```bash
-cd worker
-npm install # automatically installs Playwright browsers
-```
-
-Create `worker/.env`:
-```
-BACKEND_URL=http://localhost:3000
-WORKER_URL=http://localhost:3001
-ALLOWED_ORIGINS=*
-WORKER_HEADLESS=false
-PLAYWRIGHT_BYPASS_CSP=true
-```
-
-Run the worker:
-```bash
-npm run dev
-```
-
-> For CoderPad/HackerRank (HTTPS origins), deploy the worker behind HTTPS (Railway, Render, Fly, etc.). Set `WORKER_URL` to that public HTTPS URL, tighten `ALLOWED_ORIGINS` (comma-separated list), and set `WORKER_HEADLESS=true` so Playwright can run in container environments.
+**Note**: The backend will:
+- Validate all required environment variables on startup
+- Test database connection before starting
+- Exit with clear error messages if configuration is missing
 
 ## Features
 
@@ -103,12 +113,6 @@ npm run dev
 - `POST /api/evaluate` - Generate performance evaluation
 - `GET /api/sessions/:sessionId` - Get session details
 
-### Worker (Automation)
-- Launches browser automation
-- Injects floating chat box into coding platforms
-- Captures code snapshots every 2 seconds
-- Syncs with backend AI responses
-
 ## Deployment
 
 Each component can be deployed independently:
@@ -128,63 +132,78 @@ npm start
 # Deploy to Node.js hosting (Replit, Railway, Render, etc.)
 ```
 
-### Worker
-```bash
-cd worker
-npm run build
-npm start
-# Deploy to Node.js hosting with Playwright support
-```
-
 ## Environment Variables
 
 ### Frontend
-- `VITE_CLERK_PUBLISHABLE_KEY` - Clerk publishable key for authentication
-- `VITE_BACKEND_URL` - Backend API URL
+
+See `frontend/.env.example` for reference.
+
+**Required**:
+- `VITE_CLERK_PUBLISHABLE_KEY` - Clerk publishable key for authentication (get from https://dashboard.clerk.com)
+- `VITE_BACKEND_URL` - Backend API URL (defaults to http://localhost:3000)
+
+**Note**: All frontend environment variables must be prefixed with `VITE_` to be accessible in the browser.
 
 ### Backend
-- `OPENAI_API_KEY` - OpenAI API key for AI responses
-- `CLERK_SECRET_KEY` - Clerk secret key for JWT verification
-- `PORT` - Server port (default: 3000)
 
-### Worker
-- `BACKEND_URL` - Backend API URL for syncing
-- `WORKER_URL` - Public HTTPS origin that hosts `/proxy/:sessionId`
-- `ALLOWED_ORIGINS` - Comma-separated list of allowed browser origins (default `*`)
-- `WORKER_HEADLESS` - `true` in hosted environments (set `false` for local interactive debugging)
-- `WORKER_CHROMIUM_ARGS` - Optional comma-separated list of extra Chromium launch flags
-- `PLAYWRIGHT_BYPASS_CSP` - Enable CSP bypass (set to "true")
+See `backend/.env.example` for reference.
+
+**Required**:
+- `DATABASE_URL` - PostgreSQL connection string (get from Railway Postgres or use local PostgreSQL)
+- `OPENAI_API_KEY` - OpenAI API key for AI responses (get from https://platform.openai.com/api-keys)
+- `CLERK_SECRET_KEY` - Clerk secret key for JWT verification (get from https://dashboard.clerk.com)
+
+**Optional**:
+- `PORT` - Server port (default: 3000)
+- `FRONTEND_URL` - Frontend URL for generating candidate links (defaults to http://localhost:5000)
+
+**Startup Validation**:
+The backend validates all required environment variables on startup and exits with clear error messages if any are missing.
+
+## Database Migration
+
+Before running the backend for the first time, you must run the database migration:
+
+```bash
+cd backend
+npm run migrate
+```
+
+This creates all required tables:
+- `companies` - Company records linked to Clerk users
+- `interviews` - Interview sessions with job details
+- `submissions` - Candidate code submissions
+- `chat_messages` - Conversation history
+- `ai_analysis` - AI evaluation results
+
+The migration is idempotent and safe to run multiple times.
 
 ## Railway deployment tips
 
-1. Create two services (backend + worker) in the same Railway project.
-2. For the worker service:
-   - Install command: `npm install`
-   - Build command: `npm run build`
-   - Start command: `npm start`
-   - `npm install` automatically runs the Playwright installer (with Linux deps when available).
-   - Env vars: `BACKEND_URL=https://<backend>.railway.app`, `WORKER_URL=https://<worker>.railway.app`, `WORKER_HEADLESS=true`, `ALLOWED_ORIGINS=https://app.coderpad.io`.
+1. Create a backend service in Railway.
+2. Add PostgreSQL database service in Railway (see [backend/DATABASE_SETUP.md](backend/DATABASE_SETUP.md))
 3. For the backend service:
    - Install command: `npm install`
    - Build command: `npm run build`
    - Start command: `npm start`
-   - Env vars: `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `PORT=3000`, `WORKER_URL=https://<worker>.railway.app`.
+   - Run migration: `npm run migrate` (one-time setup)
+   - Env vars: `DATABASE_URL` (from Railway Postgres), `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `PORT=3000`, `FRONTEND_URL` (your frontend URL)
 4. Frontend:
    - Deploy on Vercel with `VITE_BACKEND_URL` pointing to the Railway backend and `VITE_CLERK_PUBLISHABLE_KEY` configured.
 
 ## Technology Stack
 
-- **Frontend**: React 18, Vite, Clerk, TailwindCSS, TypeScript
-- **Backend**: Express, OpenAI API, Clerk SDK, TypeScript
-- **Worker**: Playwright, TypeScript
+- **Frontend**: React 18, Vite, Clerk, TailwindCSS, TypeScript, Monaco Editor, React Hot Toast
+- **Backend**: Express, OpenAI API, Clerk SDK, PostgreSQL, TypeScript
+- **Database**: PostgreSQL (via Railway or local)
 - **Authentication**: Clerk
 - **AI**: OpenAI GPT-4
+- **Code Execution**: Modal.com (stub implementation)
 
 ## Development Notes
 
 - Frontend uses Vite for fast development
 - Backend uses tsx for TypeScript development
-- Worker uses Playwright for browser automation
 - All components use ES modules
 - TypeScript throughout for type safety
 
