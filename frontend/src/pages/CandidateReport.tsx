@@ -43,6 +43,9 @@ interface ReportData {
   submission: Submission
   messages: ChatMessage[]
   analysis: AIAnalysis | null
+  interview?: {
+    time_limit_minutes: number | null
+  }
 }
 
 export default function CandidateReport() {
@@ -210,7 +213,20 @@ export default function CandidateReport() {
               {timeTaken !== null && (
                 <div>
                   <p className="text-sm font-medium text-gray-500">Time Taken</p>
-                  <p className="text-lg text-gray-900">{timeTaken} minutes</p>
+                  <p className="text-lg text-gray-900">
+                    {timeTaken} {timeTaken === 1 ? 'minute' : 'minutes'}
+                    {reportData.interview?.time_limit_minutes && (
+                      <span className="text-sm text-gray-500 ml-2">
+                        (of {reportData.interview.time_limit_minutes} {reportData.interview.time_limit_minutes === 1 ? 'minute' : 'minutes'} limit)
+                      </span>
+                    )}
+                  </p>
+                </div>
+              )}
+              {reportData.interview?.time_limit_minutes && (
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Time Limit</p>
+                  <p className="text-lg text-gray-900">{reportData.interview.time_limit_minutes} {reportData.interview.time_limit_minutes === 1 ? 'minute' : 'minutes'}</p>
                 </div>
               )}
               <div>

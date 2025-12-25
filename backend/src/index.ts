@@ -27,7 +27,7 @@ import {
 import { executeCode, type CodeExecutionRequest } from './code-execution/modal.js'
 
 const app = express()
-const PORT = process.env.PORT || 3000
+const PORT = parseInt(process.env.PORT || '3000', 10)
 
 // Allow CORS from any origin (injected scripts from proxy will call this)
 app.use(cors({
@@ -336,7 +336,8 @@ app.get('/api/submissions/:submissionId', async (req, res) => {
       id: submission.id,
       code: submission.code,
       language: submission.language,
-      status: submission.status
+      status: submission.status,
+      started_at: submission.started_at
     })
   } catch (error) {
     console.error('Error in get submission:', error)
@@ -938,12 +939,33 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
           ? 'completed' 
           : 'active'
 
+        // Find earliest active submission for time calculation
+        const activeSubmissions = submissions.filter(s => s.status !== 'completed' && s.started_at)
+        let earliestStartTime: string | null = null
+        if (activeSubmissions.length > 0) {
+          earliestStartTime = activeSubmissions
+            .map(s => s.started_at!)
+            .sort()[0]
+        }
+        
+        // Calculate remaining time if there's an active candidate
+        let timeRemaining: number | null = null
+        if (earliestStartTime && interview.time_limit_minutes) {
+          const startTime = new Date(earliestStartTime).getTime()
+          const now = Date.now()
+          const elapsedSeconds = Math.floor((now - startTime) / 1000)
+          const totalSeconds = interview.time_limit_minutes * 60
+          timeRemaining = Math.max(0, totalSeconds - elapsedSeconds)
+        }
+
         return {
           id: interview.id,
           jobTitle: interview.job_title,
           createdAt: interview.created_at,
           status,
-          uniqueLink: interview.unique_link
+          uniqueLink: interview.unique_link,
+          timeLimitMinutes: interview.time_limit_minutes,
+          timeRemainingSeconds: timeRemaining
         }
       })
     )
@@ -1121,7 +1143,10 @@ app.get('/api/submissions/:submissionId/report', requireAuth, async (req, res) =
     res.json({
       submission,
       messages,
-      analysis
+      analysis,
+      interview: {
+        time_limit_minutes: interview.time_limit_minutes
+      }
     })
   } catch (error) {
     console.error('Error in get submission report:', error)
@@ -1182,9 +1207,62 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' })
 })
 
+app.patch('/api/submissions/:submissionId/status', requireAuth, async (req, res) => {
+  try {
+    const auth = (req as any).auth
+    const clerkUserId = auth.userId || auth.sub || auth.id
+    const { submissionId } = req.params
+    const { status } = req.body
+
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unable to identify user' })
+    }
+
+    // Validate status
+    const validStatuses = ['pending', 'completed', 'reviewed', 'accepted', 'rejected', 'scheduled']
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` })
+    }
+
+    // Get company by Clerk ID
+    const company = await getCompanyByClerkId(clerkUserId)
+    if (!company) {
+      return res.status(403).json({ error: 'Company not found' })
+    }
+
+    // Get submission
+    const submission = await getSubmissionById(submissionId)
+    if (!submission) {
+      return res.status(404).json({ error: 'Submission not found' })
+    }
+
+    // Verify interview belongs to user's company
+    const interview = await getInterviewById(submission.interview_id)
+    if (!interview) {
+      return res.status(404).json({ error: 'Interview not found' })
+    }
+
+    if (interview.company_id !== company.id) {
+      return res.status(403).json({ error: 'Unauthorized - Submission does not belong to your company' })
+    }
+
+    // Update status
+    const updatedSubmission = await updateSubmissionStatus(submissionId, status)
+
+    res.json(updatedSubmission)
+  } catch (error) {
+    console.error('Error in update submission status:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' })
+})
+
 // Start server after database connection test completes
 dbTestPromise.then(() => {
-  app.listen(PORT, () => {
+  app.listen(PORT, '127.0.0.1', () => {
     console.log(`Backend server running on port ${PORT}`)
   })
 }).catch(() => {

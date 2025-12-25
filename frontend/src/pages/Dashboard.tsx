@@ -13,6 +13,8 @@ interface Session {
   createdAt: string
   status: 'active' | 'completed'
   uniqueLink: string
+  timeLimitMinutes?: number | null
+  timeRemainingSeconds?: number | null
 }
 
 export default function Dashboard() {
@@ -27,6 +29,14 @@ export default function Dashboard() {
   // Fetch interviews on mount
   useEffect(() => {
     fetchInterviews()
+  }, [])
+
+  // Update current time and refetch interviews every minute for countdown
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchInterviews() // Refetch to update times
+    }, 60000) // Update every minute
+    return () => clearInterval(interval)
   }, [])
 
   const fetchInterviews = async () => {
@@ -188,6 +198,9 @@ export default function Dashboard() {
                         Job Title
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Time Limit
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Created At
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -206,6 +219,23 @@ export default function Dashboard() {
                       <tr key={session.id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {session.jobTitle}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {session.timeRemainingSeconds !== null && session.timeRemainingSeconds !== undefined ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-50 text-orange-700 rounded-md text-xs font-medium">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              {Math.floor(session.timeRemainingSeconds / 60)}:{(session.timeRemainingSeconds % 60).toString().padStart(2, '0')} remaining
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-medium">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              {session.timeLimitMinutes || 60} min
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(session.createdAt).toLocaleString()}
@@ -275,6 +305,9 @@ export default function Dashboard() {
                         Job Title
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Time Limit
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Created At
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -294,6 +327,23 @@ export default function Dashboard() {
                       >
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {session.jobTitle}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {session.timeLimitMinutes ? `${session.timeLimitMinutes} min` : 'No limit'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {new Date(session.createdAt).toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {candidateCounts.get(session.id) ?? '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-md text-xs font-medium">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {session.timeLimitMinutes || 60} min
+                          </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(session.createdAt).toLocaleString()}

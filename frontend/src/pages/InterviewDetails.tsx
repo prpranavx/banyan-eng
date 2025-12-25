@@ -43,6 +43,7 @@ export default function InterviewDetails() {
   const navigate = useNavigate()
   const [data, setData] = useState<InterviewDetails | null>(null)
   const [loading, setLoading] = useState(true)
+  const [currentTime, setCurrentTime] = useState(Date.now())
   const { getToken } = useAuth()
 
   useEffect(() => {
@@ -50,6 +51,24 @@ export default function InterviewDetails() {
       fetchDetails()
     }
   }, [interviewId])
+
+  // Update current time every minute for countdown
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now())
+    }, 60000) // Update every minute
+    return () => clearInterval(interval)
+  }, [])
+
+  // Helper function to calculate remaining time
+  const calculateTimeRemaining = (startedAt: string | null, timeLimitMinutes: number | null): number | null => {
+    if (!startedAt || !timeLimitMinutes) return null
+    const startTime = new Date(startedAt).getTime()
+    const elapsedSeconds = Math.floor((currentTime - startTime) / 1000)
+    const totalSeconds = timeLimitMinutes * 60
+    const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds)
+    return remainingSeconds
+  }
 
   const fetchDetails = async () => {
     try {
@@ -122,12 +141,17 @@ export default function InterviewDetails() {
         <div className="px-4 py-6 sm:px-0">
           {/* Interview Info */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">{data.interview.job_title}</h2>
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <span className="text-gray-500">Time Limit:</span>
-                <span className="ml-2 font-medium">{data.interview.time_limit_minutes || 60} minutes</span>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-semibold text-gray-900">{data.interview.job_title}</h2>
+              <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-200 px-4 py-2 rounded-lg">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-medium text-blue-700">Time Limit:</span>
+                <span className="text-lg font-bold text-blue-900">{data.interview.time_limit_minutes || 60} minutes</span>
               </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4 text-sm">
               <div>
                 <span className="text-gray-500">Created:</span>
                 <span className="ml-2 font-medium">{new Date(data.interview.created_at).toLocaleString()}</span>
@@ -135,6 +159,10 @@ export default function InterviewDetails() {
               <div>
                 <span className="text-gray-500">Total Candidates:</span>
                 <span className="ml-2 font-medium">{data.stats.total}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Completed:</span>
+                <span className="ml-2 font-medium">{data.stats.completed}</span>
               </div>
             </div>
           </div>
@@ -194,7 +222,17 @@ export default function InterviewDetails() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {candidate.timeTaken !== null ? `${candidate.timeTaken} min` : '-'}
+                      {candidate.status === 'completed' ? (
+                        candidate.timeTaken !== null ? `${candidate.timeTaken} min` : '-'
+                      ) : (
+                        (() => {
+                          const remaining = calculateTimeRemaining(candidate.started_at, data.interview.time_limit_minutes)
+                          if (remaining === null) return '-'
+                          const minutes = Math.floor(remaining / 60)
+                          const seconds = remaining % 60
+                          return `${minutes}:${seconds.toString().padStart(2, '0')} remaining`
+                        })()
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {candidate.analysis ? (

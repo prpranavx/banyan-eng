@@ -37,7 +37,6 @@ export default function CandidateInterview() {
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState<string>('python')
   const [loading, setLoading] = useState(false)
-  const [loadingSession, setLoadingSession] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
   const [submissionId, setSubmissionId] = useState<string | null>(null)
   const [showEditor, setShowEditor] = useState(false)
@@ -56,9 +55,10 @@ export default function CandidateInterview() {
   const [interview, setInterview] = useState<Interview | null>(null)
   const [questionPanelWidth, setQuestionPanelWidth] = useState(400)
   const [isResizing, setIsResizing] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null) // in seconds
   const [interviewTimeLimit, setInterviewTimeLimit] = useState<number | null>(null)
-  const [lastProbeTime, setLastProbeTime] = useState<number>(0)
+  const [hasWarned5Min, setHasWarned5Min] = useState(false)
+  const [hasWarned1Min, setHasWarned1Min] = useState(false)
   const [assistantPosition, setAssistantPosition] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - 340 : 0, y: typeof window !== 'undefined' ? window.innerHeight - 420 : 0 })
   const [assistantSize, setAssistantSize] = useState({ width: 320, height: 384 })
   const [isDragging, setIsDragging] = useState(false)
@@ -68,6 +68,7 @@ export default function CandidateInterview() {
   const resizeRef = useRef<HTMLDivElement>(null)
   const assistantRef = useRef<HTMLDivElement>(null)
   const resizeHandleRef = useRef<HTMLDivElement>(null)
+  const startTimeRef = useRef<number | null>(null)
 
   // Fetch interview data
   useEffect(() => {
@@ -78,6 +79,8 @@ export default function CandidateInterview() {
         const response = await fetch(`${BACKEND_URL}/api/interviews/link/${uniqueLink}`)
         if (response.ok) {
           const data = await response.json()
+          console.log('[Interview] Fetched data:', data)
+          console.log('[Interview] time_limit_minutes:', data.time_limit_minutes)
           setInterview(data)
         } else {
           console.error('Failed to fetch interview data')
@@ -221,7 +224,6 @@ export default function CandidateInterview() {
 
     const fetchSession = async () => {
       try {
-        setLoadingSession(true)
         const response = await fetch(`${BACKEND_URL}/api/sessions/${submissionId}`)
         if (response.ok) {
           const sessionData = await response.json()
@@ -233,8 +235,6 @@ export default function CandidateInterview() {
       } catch (error) {
         toast.error(handleApiError(error))
         console.error('Failed to fetch session:', error)
-      } finally {
-        setLoadingSession(false)
       }
     }
 
@@ -286,32 +286,78 @@ export default function CandidateInterview() {
     return () => clearTimeout(timeoutId)
   }, [code, language, submissionId, showEditor])
 
-  // Calculate time remaining
+  // Calculate time remaining - real-time countdown
   useEffect(() => {
     if (!submissionId || !interviewTimeLimit || !showEditor) return
 
-    const calculateTimeRemaining = async () => {
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    // Initialize timer: fetch start time, then start calculation
+    const initializeTimer = async () => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/submissions/${submissionId}`)
-        if (response.ok) {
-          const sub = await response.json()
-          if (sub.started_at) {
-            const startTime = new Date(sub.started_at).getTime()
-            const now = Date.now()
-            const elapsedMinutes = Math.floor((now - startTime) / 1000 / 60)
-            const remaining = Math.max(0, interviewTimeLimit - elapsedMinutes)
-            setTimeRemaining(remaining)
+        if (!response.ok) {
+          console.error('[Time] Failed to fetch submission:', response.status)
+          return
+        }
+
+        const sub = await response.json()
+        console.log('[Time] Submission data:', sub)
+        console.log('[Time] started_at:', sub.started_at)
+
+        if (!sub.started_at) {
+          console.warn('[Time] No started_at in submission - interview may not have started')
+          return
+        }
+
+        // Set start time
+        startTimeRef.current = new Date(sub.started_at).getTime()
+
+        // Calculate function
+        const calculateTimeRemaining = () => {
+          if (startTimeRef.current === null) return
+
+          const now = Date.now()
+          const elapsedSeconds = Math.floor((now - startTimeRef.current) / 1000)
+          const totalSeconds = interviewTimeLimit * 60
+          const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds)
+
+          setTimeRemaining(remainingSeconds)
+
+          // Auto-submit when time runs out
+          if (remainingSeconds === 0 && session?.status !== 'completed' && submissionId) {
+            toast.error('Time is up! Submitting your interview automatically...')
+            handleSubmitInterview().catch(err => {
+              console.error('Auto-submit failed:', err)
+            })
+          }
+
+          // Warning toasts
+          if (remainingSeconds <= 300 && remainingSeconds > 299 && !hasWarned5Min) {
+            toast.error('⚠️ 5 minutes remaining!', { duration: 5000 })
+            setHasWarned5Min(true)
+          }
+          if (remainingSeconds <= 60 && remainingSeconds > 59 && !hasWarned1Min) {
+            toast.error('⚠️ 1 minute remaining!', { duration: 5000 })
+            setHasWarned1Min(true)
           }
         }
+
+        // Calculate immediately, then every second
+        calculateTimeRemaining()
+        interval = setInterval(calculateTimeRemaining, 1000)
       } catch (error) {
-        console.error('Error fetching submission for time tracking:', error)
+        console.error('[Time] Error fetching start time:', error)
       }
     }
 
-    calculateTimeRemaining()
-    const interval = setInterval(calculateTimeRemaining, 60000) // Update every minute
-    return () => clearInterval(interval)
-  }, [submissionId, interviewTimeLimit, showEditor])
+    initializeTimer()
+
+    return () => {
+      if (interval) clearInterval(interval)
+      startTimeRef.current = null
+    }
+  }, [submissionId, interviewTimeLimit, showEditor, session, hasWarned5Min, hasWarned1Min])
 
   // Proactive AI probing - trigger on code changes with debounce
   useEffect(() => {
@@ -319,7 +365,7 @@ export default function CandidateInterview() {
 
     // Debounce: wait 30 seconds after last code change before probing
     const PROBE_DEBOUNCE = 30 * 1000 // 30 seconds
-    let probeTimeoutId: NodeJS.Timeout | null = null
+    let probeTimeoutId: ReturnType<typeof setTimeout> | null = null
 
     const probeCandidate = async () => {
       try {
@@ -341,7 +387,6 @@ export default function CandidateInterview() {
             timestamp: new Date().toISOString()
           }
           setMessages(prev => [...prev, probeMessage])
-          setLastProbeTime(Date.now())
           toast.success('AI has a question for you!', { duration: 3000 })
         }
       } catch (error) {
@@ -628,7 +673,7 @@ export default function CandidateInterview() {
       {showEditor && (
         <div
           ref={assistantRef}
-          className="fixed z-50 bg-white border-2 border-indigo-500 rounded-lg shadow-lg flex flex-col"
+          className="fixed z-50 bg-white border-2 border-indigo-500 rounded-lg shadow-lg flex flex-col overflow-hidden"
           style={{
             left: `${assistantPosition.x}px`,
             top: `${assistantPosition.y}px`,
@@ -637,7 +682,7 @@ export default function CandidateInterview() {
           }}
         >
           <div
-            className="bg-indigo-500 text-white p-3 font-semibold rounded-t-lg cursor-move select-none"
+            className="bg-indigo-500 text-white p-3 font-semibold cursor-move select-none"
             onMouseDown={handleDragStart}
           >
             AI Interview Assistant
@@ -705,33 +750,37 @@ export default function CandidateInterview() {
 
       {/* Main Content */}
       <div className="h-screen flex flex-col">
-        <header className="bg-white shadow-sm py-3 px-6 z-10 border-b border-gray-200">
+        <header className="bg-indigo-600 shadow-sm py-3 px-6 z-10">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-lg font-semibold text-gray-800">
+              <h1 className="text-lg font-semibold text-white">
                 {interview?.job_title || 'Live Coding Interview'}
               </h1>
               {submissionId && (
-                <p className="text-xs text-gray-500">Session: {submissionId.slice(0, 8)}...</p>
+                <p className="text-xs text-indigo-200">Session: {submissionId.slice(0, 8)}...</p>
               )}
             </div>
             {showEditor && (
               <div className="flex items-center gap-4">
-                {interviewTimeLimit && timeRemaining !== null && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">Time Remaining:</span>
-                    <span className={`text-sm font-semibold ${
-                      timeRemaining < 10 ? 'text-red-600' : 'text-gray-900'
+                {interviewTimeLimit && (
+                  <div className="flex items-center gap-2 bg-indigo-500/30 px-4 py-2 rounded-lg border-2 border-indigo-400">
+                    <span className="text-sm font-medium text-indigo-100">Time Remaining:</span>
+                    <span className={`text-lg font-bold font-mono ${
+                      timeRemaining !== null && timeRemaining < 300 ? 'text-red-300' : 
+                      timeRemaining !== null && timeRemaining < 600 ? 'text-orange-300' : 'text-white'
                     }`}>
-                      {timeRemaining} min
+                      {timeRemaining !== null 
+                        ? `${Math.floor(timeRemaining / 60)}:${(timeRemaining % 60).toString().padStart(2, '0')}`
+                        : `${interviewTimeLimit}:00`
+                      }
                     </span>
                   </div>
                 )}
-                <label className="text-sm font-medium text-gray-700">Language:</label>
+                <label className="text-sm font-medium text-indigo-100">Language:</label>
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="border border-indigo-400 bg-white rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 >
                   <option value="python">Python</option>
                   <option value="javascript">JavaScript</option>
@@ -740,13 +789,13 @@ export default function CandidateInterview() {
                   <option value="java">Java</option>
                 </select>
                 {isSaving && (
-                  <span className="text-sm text-gray-500 flex items-center gap-2">
+                  <span className="text-sm text-indigo-200 flex items-center gap-2">
                     <LoadingSpinner size="sm" />
                     Saving...
                   </span>
                 )}
                 {!isSaving && lastSaved && !saveError && (
-                  <span className="text-sm text-green-600">Saved</span>
+                  <span className="text-sm text-green-300">Saved</span>
                 )}
                 {saveError && (
                   <span className="text-sm text-red-600" title={saveError}>
@@ -825,20 +874,20 @@ export default function CandidateInterview() {
           <div className="flex-1 flex overflow-hidden bg-gray-50">
             {/* Question Panel - Resizable */}
             <div
-              className="bg-white border-r border-gray-300 overflow-y-auto"
+              className="bg-gray-900 border-r border-gray-700 overflow-y-auto"
               style={{ width: `${questionPanelWidth}px`, minWidth: '300px', maxWidth: '60%' }}
             >
               <div className="p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">Problem</h2>
+                <h2 className="text-xl font-semibold text-gray-100 mb-4">Problem</h2>
                 
                 {interview?.instructions ? (
-                  <div className="prose max-w-none prose-headings:text-gray-900 prose-p:text-gray-700 prose-code:text-indigo-600 prose-pre:bg-gray-100 prose-pre:border prose-pre:border-gray-300 prose-pre:rounded">
+                  <div className="prose max-w-none prose-invert prose-headings:text-gray-100 prose-p:text-gray-300 prose-code:bg-gray-800 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-indigo-400 prose-pre:bg-gray-950 prose-pre:text-gray-100 prose-pre:p-4 prose-pre:rounded-lg prose-pre:my-4 prose-pre:border prose-pre:border-gray-700 prose-pre:overflow-x-auto">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {interview.instructions}
                     </ReactMarkdown>
                   </div>
                 ) : (
-                  <div className="text-gray-500 italic">
+                  <div className="text-gray-400 italic">
                     No specific instructions provided. Please write code to solve the problem.
                   </div>
                 )}
@@ -849,7 +898,7 @@ export default function CandidateInterview() {
             <div
               ref={resizeRef}
               onMouseDown={() => setIsResizing(true)}
-              className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors"
+              className="w-1 bg-gray-700 hover:bg-gray-600 cursor-col-resize transition-colors"
               style={{ cursor: 'col-resize' }}
             />
 
