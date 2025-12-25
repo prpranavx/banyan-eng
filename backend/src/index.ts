@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import OpenAI from 'openai'
 import { clerkClient } from '@clerk/clerk-sdk-node'
 import type { Session, SendMessageRequest, EvaluateRequest, EvaluationResult } from './types.js'
+import type { Interview } from './db/types.js'
 import { getDb } from './db.js'
 import {
   getOrCreateCompany,
@@ -14,6 +15,7 @@ import {
   getInterviewsByCompany,
   createSubmission,
   getSubmissionById,
+  getSubmissionByEmailAndInterview,
   getSubmissionsByInterview,
   updateSubmissionCode,
   updateSubmissionStatus,
@@ -231,7 +233,8 @@ app.post('/api/generate-session', requireAuth, async (req, res) => {
       job_title: jobTitle,
       job_description: req.body.jobDescription || null,
       instructions: req.body.instructions || null,
-      unique_link: uniqueLink
+      unique_link: uniqueLink,
+      time_limit_minutes: req.body.timeLimitMinutes || 60
     })
 
     console.log(`Created new interview: ${interview.id}`)
@@ -265,16 +268,78 @@ app.post('/api/submissions', async (req, res) => {
       return res.status(404).json({ error: 'Interview not found' })
     }
 
-    // Create submission
+    // Check if submission already exists for this email and interview
+    const existingSubmission = await getSubmissionByEmailAndInterview(
+      candidateEmail,
+      interview.id
+    )
+
+    if (existingSubmission) {
+      // Resume existing session
+      return res.json({ 
+        submissionId: existingSubmission.id,
+        resumed: true
+      })
+    }
+
+    // Create new submission
     const submission = await createSubmission({
       interview_id: interview.id,
       candidate_name: candidateName,
-      candidate_email: candidateEmail
+      candidate_email: candidateEmail,
+      started_at: new Date().toISOString()
     })
 
     res.json({ submissionId: submission.id })
   } catch (error) {
     console.error('Error in create submission:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// Public endpoint to get interview details by unique link (for candidates)
+app.get('/api/interviews/link/:uniqueLink', async (req, res) => {
+  try {
+    const { uniqueLink } = req.params
+    const interview = await getInterviewByLink(uniqueLink)
+    
+    if (!interview) {
+      return res.status(404).json({ error: 'Interview not found' })
+    }
+    
+    // Return only public fields (no company_id, job_description, etc.)
+    res.json({
+      id: interview.id,
+      job_title: interview.job_title,
+      instructions: interview.instructions,
+      unique_link: interview.unique_link,
+      time_limit_minutes: interview.time_limit_minutes
+    })
+  } catch (error) {
+    console.error('Error fetching interview by link:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// Public endpoint to get submission details (for candidates to resume)
+app.get('/api/submissions/:submissionId', async (req, res) => {
+  try {
+    const { submissionId } = req.params
+    const submission = await getSubmissionById(submissionId)
+    
+    if (!submission) {
+      return res.status(404).json({ error: 'Submission not found' })
+    }
+    
+    // Return only public fields
+    res.json({
+      id: submission.id,
+      code: submission.code,
+      language: submission.language,
+      status: submission.status
+    })
+  } catch (error) {
+    console.error('Error in get submission:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -304,6 +369,36 @@ app.patch('/api/submissions/:submissionId', async (req, res) => {
   }
 })
 
+// Public endpoint for candidates to submit their interview
+app.post('/api/submissions/:submissionId/submit', async (req, res) => {
+  try {
+    const { submissionId } = req.params
+
+    // Verify submission exists
+    const submission = await getSubmissionById(submissionId)
+    if (!submission) {
+      return res.status(404).json({ error: 'Submission not found' })
+    }
+
+    // Check if already submitted
+    if (submission.status === 'completed') {
+      return res.status(400).json({ error: 'Interview has already been submitted' })
+    }
+
+    // Update submission status to completed
+    // This will also set submitted_at timestamp (handled by updateSubmissionStatus or we can set it explicitly)
+    await updateSubmissionStatus(submissionId, 'completed')
+
+    res.json({ 
+      success: true,
+      message: 'Interview submitted successfully'
+    })
+  } catch (error) {
+    console.error('Error in submit interview:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 app.post('/api/code/execute', async (req, res) => {
   try {
     const { code, language } = req.body
@@ -326,9 +421,10 @@ app.post('/api/code/execute', async (req, res) => {
     }
 
     // Validate language
-    if (language !== 'python' && language !== 'javascript') {
+    const validLanguages = ['python', 'javascript', 'c', 'cpp', 'java']
+    if (!validLanguages.includes(language)) {
       return res.status(400).json({
-        error: 'Invalid language. Must be "python" or "javascript"',
+        error: `Invalid language. Must be one of: ${validLanguages.join(', ')}`,
         success: false,
         output: ''
       })
@@ -492,80 +588,236 @@ app.post('/api/evaluate', requireAuth, async (req, res) => {
 
     // Try to get submission by ID first
     let submission = await getSubmissionById(sessionId)
+    let interview: Interview | null = null
 
     if (!submission) {
       // Try to get interview by ID, then get latest submission
-      let interview = await getInterviewById(sessionId)
+      interview = await getInterviewById(sessionId)
       if (!interview) {
         interview = await getInterviewByLink(sessionId)
       }
       if (interview) {
         const submissions = await getSubmissionsByInterview(interview.id)
         if (submissions.length > 0) {
-          submission = submissions[0] // Get most recent submission
+          submission = submissions[0] // Get most recent submission for evaluation
         }
       }
+    } else {
+      // Get interview from submission
+      interview = await getInterviewById(submission.interview_id)
     }
 
     if (!submission) {
       return res.status(404).json({ error: 'Submission not found' })
     }
 
-    // Get all chat messages for this submission
-    const chatMessages = await getChatMessages(submission.id)
-    const transcript = chatMessages
-      .map(m => `${m.sender.toUpperCase()}: ${m.message}`)
-      .join('\n\n')
+    // Check if analysis already exists
+    const existingAnalysis = await getAIAnalysisBySubmission(submission.id)
+    if (existingAnalysis) {
+      // Return existing analysis
+      await updateSubmissionStatus(submission.id, 'completed')
+      const result: EvaluationResult = {
+        sessionId,
+        score: existingAnalysis.score,
+        summary: existingAnalysis.summary,
+        strengths: existingAnalysis.strengths,
+        improvements: existingAnalysis.improvements
+      }
+      return res.json(result)
+    }
 
-    const evaluationPrompt = `Analyze this coding interview transcript and provide a JSON evaluation with:
+    // IMMEDIATELY mark all submissions as completed to end the interview
+    // This prevents candidates from typing further
+    if (interview) {
+      const allSubmissions = await getSubmissionsByInterview(interview.id)
+      await Promise.all(
+        allSubmissions.map(sub => updateSubmissionStatus(sub.id, 'completed'))
+      )
+    } else {
+      await updateSubmissionStatus(submission.id, 'completed')
+    }
+
+    // Return immediately - evaluation will happen in background
+    res.json({ 
+      sessionId,
+      status: 'evaluating',
+      message: 'Interview ended. Evaluation in progress...'
+    })
+
+    // Start evaluation asynchronously (don't await)
+    ;(async () => {
+      try {
+        // Get all chat messages for this submission
+        const chatMessages = await getChatMessages(submission.id)
+        const transcript = chatMessages
+          .map(m => `${m.sender.toUpperCase()}: ${m.message}`)
+          .join('\n\n')
+
+        // Include code in evaluation if transcript is short or empty
+        let evaluationPrompt = ''
+        if (transcript.trim().length < 50 && submission.code) {
+          evaluationPrompt = `Analyze this coding interview submission and provide a JSON evaluation with:
+- score (0-100)
+- summary (brief overview)
+- strengths (array of strings)
+- improvements (array of strings)
+
+Candidate Code:
+${submission.code}
+
+Language: ${submission.language || 'Not specified'}
+
+Transcript:
+${transcript || 'No conversation yet'}
+
+Respond with valid JSON only.`
+        } else {
+          evaluationPrompt = `Analyze this coding interview transcript and provide a JSON evaluation with:
 - score (0-100)
 - summary (brief overview)
 - strengths (array of strings)
 - improvements (array of strings)
 
 Transcript:
-${transcript}
+${transcript || 'No conversation yet'}
+
+${submission.code ? `Candidate Code:\n${submission.code}\n\nLanguage: ${submission.language || 'Not specified'}` : ''}
 
 Respond with valid JSON only.`
+        }
 
-    console.log('Calling OpenAI for evaluation...')
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: evaluationPrompt }],
-      response_format: { type: 'json_object' }
-    })
+        console.log('Calling OpenAI for evaluation (async)...')
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: evaluationPrompt }],
+          response_format: { type: 'json_object' }
+        })
 
-    const resultText = completion.choices[0]?.message?.content || '{}'
-    const evaluation = JSON.parse(resultText)
+        const resultText = completion.choices[0]?.message?.content || '{}'
+        let evaluation
+        try {
+          evaluation = JSON.parse(resultText)
+        } catch (parseError) {
+          console.error('Failed to parse evaluation JSON:', resultText)
+          return
+        }
 
-    // Save analysis to database
-    try {
-      await createAIAnalysis({
-        submission_id: submission.id,
-        score: evaluation.score || 0,
-        summary: evaluation.summary || 'No summary available',
-        strengths: evaluation.strengths || [],
-        improvements: evaluation.improvements || []
-      })
-    } catch (analysisError) {
-      // If analysis already exists, log but continue
-      console.warn('Analysis already exists for this submission:', analysisError)
-    }
+        // Validate evaluation has required fields
+        if (typeof evaluation.score !== 'number' || evaluation.score < 0 || evaluation.score > 100) {
+          console.error('Invalid evaluation score:', evaluation)
+          return
+        }
+        if (!evaluation.summary) {
+          evaluation.summary = 'No summary available'
+        }
+        if (!Array.isArray(evaluation.strengths)) {
+          evaluation.strengths = []
+        }
+        if (!Array.isArray(evaluation.improvements)) {
+          evaluation.improvements = []
+        }
 
-    // Update submission status to completed
-    await updateSubmissionStatus(submission.id, 'completed')
+        // Save analysis to database
+        await createAIAnalysis({
+          submission_id: submission.id,
+          score: evaluation.score,
+          summary: evaluation.summary,
+          strengths: evaluation.strengths,
+          improvements: evaluation.improvements
+        })
 
-    const result: EvaluationResult = {
-      sessionId,
-      score: evaluation.score || 0,
-      summary: evaluation.summary || 'No summary available',
-      strengths: evaluation.strengths || [],
-      improvements: evaluation.improvements || []
-    }
-
-    res.json(result)
+        console.log('Evaluation completed for submission:', submission.id)
+      } catch (error) {
+        console.error('Error in async evaluation:', error)
+      }
+    })()
   } catch (error) {
     console.error('Error in evaluate:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// Proactive AI probing endpoint
+app.post('/api/probe-candidate', async (req, res) => {
+  try {
+    const { submissionId, code, language } = req.body
+
+    if (!submissionId) {
+      return res.status(400).json({ error: 'Missing submissionId' })
+    }
+
+    const submission = await getSubmissionById(submissionId)
+    if (!submission) {
+      return res.status(404).json({ error: 'Submission not found' })
+    }
+
+    const interview = await getInterviewById(submission.interview_id)
+    if (!interview) {
+      return res.status(404).json({ error: 'Interview not found' })
+    }
+
+    // Get recent chat messages to avoid repeating questions
+    const recentMessages = await getChatMessages(submissionId)
+    const recentProbes = recentMessages
+      .filter(m => m.is_probing_question)
+      .slice(-3)
+      .map(m => m.message)
+
+    const probingPrompt = `You are an AI technical interviewer analyzing a candidate's code in real-time.
+
+Job Description: ${interview.job_description || 'Not provided'}
+Problem/Instructions: ${interview.instructions || 'Not provided'}
+Candidate's Current Code: ${code || 'No code written yet'}
+Language: ${language || 'Not specified'}
+
+Recent probing questions asked:
+${recentProbes.length > 0 ? recentProbes.join('\n') : 'None yet'}
+
+Generate a SINGLE probing question that:
+1. Is highly relevant to the job requirements and problem context
+2. Tests understanding of a specific technical decision in their code
+3. Is specific and actionable (not generic)
+4. Encourages explanation (not just yes/no)
+5. Is different from recent questions
+
+Examples:
+- If they use malloc in embedded systems: "I notice you used malloc(). For a resource-constrained embedded system with 2KB RAM, have you considered the implications of dynamic memory allocation?"
+- If they use recursion: "Your solution uses recursion. For a system that needs to handle very large inputs, what are the trade-offs you're considering?"
+
+Return ONLY valid JSON:
+{
+  "question": "Your specific probing question here",
+  "context": "Brief explanation of why this question is relevant"
+}`
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: probingPrompt }],
+      response_format: { type: 'json_object' },
+      temperature: 0.7
+    })
+
+    const result = JSON.parse(completion.choices[0]?.message?.content || '{}')
+    
+    if (!result.question) {
+      return res.status(500).json({ error: 'Failed to generate probing question' })
+    }
+
+    // Save as chat message with probing flag
+    await addChatMessage({
+      submission_id: submissionId,
+      session_id: submission.interview_id,
+      sender: 'assistant',
+      message: result.question,
+      is_probing_question: true
+    })
+
+    res.json({
+      question: result.question,
+      context: result.context
+    })
+  } catch (error) {
+    console.error('Error in probe-candidate:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -665,10 +917,24 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
       interviews.map(async (interview) => {
         // Get submissions to determine status
         const submissions = await getSubmissionsByInterview(interview.id)
-        const hasCompletedSubmission = submissions.some(s => s.status === 'completed')
-        // If all submissions are completed or no submissions exist, mark as completed
-        // Otherwise active
-        const status = (submissions.length > 0 && submissions.every(s => s.status === 'completed')) 
+        
+        // Check if any submission has an AI analysis (interview was ended/evaluated)
+        let hasEvaluation = false
+        for (const submission of submissions) {
+          try {
+            const analysis = await getAIAnalysisBySubmission(submission.id)
+            if (analysis) {
+              hasEvaluation = true
+              break
+            }
+          } catch {
+            // Continue checking other submissions
+          }
+        }
+        
+        // If interview was evaluated (ended), mark as completed
+        // OR if all submissions are completed
+        const status = hasEvaluation || (submissions.length > 0 && submissions.every(s => s.status === 'completed'))
           ? 'completed' 
           : 'active'
 
@@ -741,6 +1007,75 @@ app.get('/api/interviews/:interviewId/submissions', requireAuth, async (req, res
     res.json(submissions)
   } catch (error) {
     console.error('Error in get submissions:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// Get interview details with all candidates, stats, and time tracking
+app.get('/api/interviews/:interviewId/details', requireAuth, async (req, res) => {
+  try {
+    const auth = (req as any).auth
+    const clerkUserId = auth.userId || auth.sub || auth.id
+
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unauthorized' })
+    }
+
+    const company = await getCompanyByClerkId(clerkUserId)
+    if (!company) {
+      return res.status(404).json({ error: 'Company not found' })
+    }
+
+    const { interviewId } = req.params
+    const interview = await getInterviewById(interviewId)
+
+    if (!interview || interview.company_id !== company.id) {
+      return res.status(404).json({ error: 'Interview not found' })
+    }
+
+    const submissions = await getSubmissionsByInterview(interviewId)
+    const analyses = await Promise.all(
+      submissions.map(async (sub) => {
+        try {
+          return await getAIAnalysisBySubmission(sub.id)
+        } catch {
+          return null
+        }
+      })
+    )
+
+    const candidatesWithAnalysis = submissions.map((sub, idx) => {
+      let timeTaken: number | null = null
+      if (sub.started_at && sub.submitted_at) {
+        const startTime = new Date(sub.started_at).getTime()
+        const submitTime = new Date(sub.submitted_at).getTime()
+        timeTaken = Math.round((submitTime - startTime) / 1000 / 60) // minutes
+      }
+
+      return {
+        ...sub,
+        analysis: analyses[idx],
+        timeTaken
+      }
+    })
+
+    const completedSubmissions = submissions.filter(s => s.status === 'completed')
+    const analysesWithScores = analyses.filter(a => a !== null)
+    const averageScore = analysesWithScores.length > 0
+      ? Math.round(analysesWithScores.reduce((sum, a) => sum + (a?.score || 0), 0) / analysesWithScores.length)
+      : null
+
+    res.json({
+      interview,
+      candidates: candidatesWithAnalysis,
+      stats: {
+        total: submissions.length,
+        completed: completedSubmissions.length,
+        averageScore
+      }
+    })
+  } catch (error) {
+    console.error('Error fetching interview details:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })

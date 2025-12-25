@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import toast from 'react-hot-toast'
 import LoadingSpinner from '../components/LoadingSpinner.tsx'
 import { handleApiError, parseApiError } from '../utils/apiErrorHandler.ts'
@@ -19,6 +21,15 @@ interface Session {
   status: 'active' | 'completed'
 }
 
+interface Interview {
+  id: string
+  job_title: string
+  job_description: string | null
+  instructions: string | null
+  unique_link: string
+  time_limit_minutes: number | null
+}
+
 export default function CandidateInterview() {
   const { uniqueLink } = useParams<{ uniqueLink: string }>()
   const [messages, setMessages] = useState<Message[]>([])
@@ -34,6 +45,7 @@ export default function CandidateInterview() {
   const [candidateEmail, setCandidateEmail] = useState('')
   const [formError, setFormError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmittingInterview, setIsSubmittingInterview] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -41,11 +53,167 @@ export default function CandidateInterview() {
   const [executionError, setExecutionError] = useState<string | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
   const [executionSuccess, setExecutionSuccess] = useState<boolean | null>(null)
+  const [interview, setInterview] = useState<Interview | null>(null)
+  const [questionPanelWidth, setQuestionPanelWidth] = useState(400)
+  const [isResizing, setIsResizing] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
+  const [interviewTimeLimit, setInterviewTimeLimit] = useState<number | null>(null)
+  const [lastProbeTime, setLastProbeTime] = useState<number>(0)
+  const [assistantPosition, setAssistantPosition] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - 340 : 0, y: typeof window !== 'undefined' ? window.innerHeight - 420 : 0 })
+  const [assistantSize, setAssistantSize] = useState({ width: 320, height: 384 })
+  const [isDragging, setIsDragging] = useState(false)
+  const [isResizingAssistant, setIsResizingAssistant] = useState(false)
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const resizeRef = useRef<HTMLDivElement>(null)
+  const assistantRef = useRef<HTMLDivElement>(null)
+  const resizeHandleRef = useRef<HTMLDivElement>(null)
+
+  // Fetch interview data
+  useEffect(() => {
+    if (!uniqueLink) return
+
+    const fetchInterview = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/interviews/link/${uniqueLink}`)
+        if (response.ok) {
+          const data = await response.json()
+          setInterview(data)
+        } else {
+          console.error('Failed to fetch interview data')
+        }
+      } catch (error) {
+        console.error('Error fetching interview:', error)
+      }
+    }
+
+    fetchInterview()
+  }, [uniqueLink])
+
+  // Set time limit when interview is fetched
+  useEffect(() => {
+    if (interview?.time_limit_minutes) {
+      setInterviewTimeLimit(interview.time_limit_minutes)
+    }
+  }, [interview])
+
+  // Handle panel resizing
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = e.clientX
+      if (newWidth >= 300 && newWidth <= window.innerWidth - 300) {
+        setQuestionPanelWidth(newWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isResizing])
+
+  // Handle AI assistant dragging
+  useEffect(() => {
+    if (!isDragging) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newX = e.clientX - dragStart.x
+      const newY = e.clientY - dragStart.y
+      
+      // Constrain to viewport
+      const maxX = window.innerWidth - assistantSize.width
+      const maxY = window.innerHeight - assistantSize.height
+      
+      setAssistantPosition({
+        x: Math.max(0, Math.min(newX, maxX)),
+        y: Math.max(0, Math.min(newY, maxY))
+      })
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging, dragStart, assistantSize])
+
+  // Handle AI assistant resizing
+  useEffect(() => {
+    if (!isResizingAssistant) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(280, Math.min(e.clientX - assistantPosition.x, window.innerWidth * 0.8))
+      const newHeight = Math.max(200, Math.min(e.clientY - assistantPosition.y, window.innerHeight * 0.8))
+      
+      // Ensure assistant doesn't go off-screen
+      const maxX = window.innerWidth - newWidth
+      const maxY = window.innerHeight - newHeight
+      
+      if (assistantPosition.x > maxX) {
+        setAssistantPosition(prev => ({ ...prev, x: maxX }))
+      }
+      if (assistantPosition.y > maxY) {
+        setAssistantPosition(prev => ({ ...prev, y: maxY }))
+      }
+      
+      setAssistantSize({ width: newWidth, height: newHeight })
+    }
+
+    const handleMouseUp = () => {
+      setIsResizingAssistant(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isResizingAssistant, assistantPosition])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Load existing submission code when resuming
+  useEffect(() => {
+    if (!submissionId || !showEditor) return
+
+    const loadSubmission = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/submissions/${submissionId}`)
+        if (response.ok) {
+          const submission = await response.json()
+          if (submission.code) {
+            setCode(submission.code)
+          }
+          if (submission.language) {
+            setLanguage(submission.language)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load submission:', error)
+      }
+    }
+
+    loadSubmission()
+  }, [submissionId, showEditor])
 
   // Fetch session details (only if we have submissionId)
   useEffect(() => {
@@ -71,14 +239,16 @@ export default function CandidateInterview() {
     }
 
     fetchSession()
+    
+    // Poll session status to check if interview ended
+    const interval = setInterval(fetchSession, 5000) // Check every 5 seconds
+    return () => clearInterval(interval)
   }, [submissionId])
 
   // Autosave code and language with debouncing
   useEffect(() => {
-    // Don't save if no submission ID or editor not shown
     if (!submissionId || !showEditor) return
 
-    // Clear existing timeout
     const timeoutId = setTimeout(async () => {
       setIsSaving(true)
       setSaveError(null)
@@ -101,7 +271,6 @@ export default function CandidateInterview() {
         setLastSaved(new Date())
         toast.success('Code saved', { duration: 2000 })
         
-        // Clear save indicator after a brief delay
         setTimeout(() => {
           setIsSaving(false)
         }, 500)
@@ -112,17 +281,93 @@ export default function CandidateInterview() {
         setIsSaving(false)
         console.error('Failed to autosave code:', error)
       }
-    }, 2000) // 2 seconds delay
+    }, 2000)
 
-    // Cleanup function
     return () => clearTimeout(timeoutId)
   }, [code, language, submissionId, showEditor])
+
+  // Calculate time remaining
+  useEffect(() => {
+    if (!submissionId || !interviewTimeLimit || !showEditor) return
+
+    const calculateTimeRemaining = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/submissions/${submissionId}`)
+        if (response.ok) {
+          const sub = await response.json()
+          if (sub.started_at) {
+            const startTime = new Date(sub.started_at).getTime()
+            const now = Date.now()
+            const elapsedMinutes = Math.floor((now - startTime) / 1000 / 60)
+            const remaining = Math.max(0, interviewTimeLimit - elapsedMinutes)
+            setTimeRemaining(remaining)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching submission for time tracking:', error)
+      }
+    }
+
+    calculateTimeRemaining()
+    const interval = setInterval(calculateTimeRemaining, 60000) // Update every minute
+    return () => clearInterval(interval)
+  }, [submissionId, interviewTimeLimit, showEditor])
+
+  // Proactive AI probing - trigger on code changes with debounce
+  useEffect(() => {
+    if (!submissionId || !showEditor || !code.trim()) return
+
+    // Debounce: wait 30 seconds after last code change before probing
+    const PROBE_DEBOUNCE = 30 * 1000 // 30 seconds
+    let probeTimeoutId: NodeJS.Timeout | null = null
+
+    const probeCandidate = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/probe-candidate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            submissionId,
+            code,
+            language
+          })
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          const probeMessage: Message = {
+            role: 'assistant',
+            content: data.question,
+            timestamp: new Date().toISOString()
+          }
+          setMessages(prev => [...prev, probeMessage])
+          setLastProbeTime(Date.now())
+          toast.success('AI has a question for you!', { duration: 3000 })
+        }
+      } catch (error) {
+        console.error('Failed to probe candidate:', error)
+      }
+    }
+
+    // Clear previous timeout
+    if (probeTimeoutId) {
+      clearTimeout(probeTimeoutId)
+    }
+
+    // Set new timeout - probe after 30 seconds of inactivity
+    probeTimeoutId = setTimeout(() => {
+      probeCandidate()
+    }, PROBE_DEBOUNCE)
+
+    return () => {
+      if (probeTimeoutId) clearTimeout(probeTimeoutId)
+    }
+  }, [submissionId, showEditor, code, language]) // Trigger on code changes
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setFormError('')
 
-    // Validation
     if (!candidateName.trim()) {
       setFormError('Candidate name is required')
       return
@@ -133,7 +378,6 @@ export default function CandidateInterview() {
       return
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(candidateEmail)) {
       setFormError('Please enter a valid email address')
@@ -161,7 +405,11 @@ export default function CandidateInterview() {
       const data = await response.json()
       setSubmissionId(data.submissionId)
       setShowEditor(true)
-      toast.success('Interview started successfully!')
+      if (data.resumed) {
+        toast.success('Welcome back! Resuming your previous session...')
+      } else {
+        toast.success('Interview started successfully!')
+      }
     } catch (error) {
       const errorMessage = handleApiError(error)
       setFormError(errorMessage)
@@ -173,6 +421,12 @@ export default function CandidateInterview() {
   }
 
   const handleRunCode = async () => {
+    // Check if interview is ended
+    if (session?.status === 'completed') {
+      toast.error('This interview has ended. You can no longer run code.')
+      return
+    }
+    
     if (!code.trim() || isExecuting) return
 
     setIsExecuting(true)
@@ -221,7 +475,75 @@ export default function CandidateInterview() {
     }
   }
 
+  const handleSubmitInterview = async () => {
+    if (!submissionId) return
+    
+    if (session?.status === 'completed') {
+      toast.error('This interview has already been submitted.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      'Are you sure you want to submit your interview? You will not be able to make further changes.'
+    )
+    
+    if (!confirmed) return
+
+    setIsSubmittingInterview(true)
+    
+    try {
+      // First, save the final code
+      const saveResponse = await fetch(`${BACKEND_URL}/api/submissions/${submissionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: code || '',
+          language: language
+        })
+      })
+
+      if (!saveResponse.ok) {
+        const errorMessage = await parseApiError(saveResponse)
+        throw new Error(errorMessage)
+      }
+
+      // Then, submit the interview
+      const submitResponse = await fetch(`${BACKEND_URL}/api/submissions/${submissionId}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      if (!submitResponse.ok) {
+        const errorMessage = await parseApiError(submitResponse)
+        throw new Error(errorMessage)
+      }
+
+      toast.success('Interview submitted successfully! Thank you for your time.')
+      
+      // Refresh session to get updated status
+      const sessionResponse = await fetch(`${BACKEND_URL}/api/sessions/${submissionId}`)
+      if (sessionResponse.ok) {
+        const sessionData = await sessionResponse.json()
+        setSession(sessionData)
+      }
+      
+      // Disable editor (readOnly will be set based on session.status)
+    } catch (error) {
+      const errorMessage = handleApiError(error)
+      toast.error(`Failed to submit interview: ${errorMessage}`)
+      console.error('Failed to submit interview:', error)
+    } finally {
+      setIsSubmittingInterview(false)
+    }
+  }
+
   const sendMessage = async () => {
+    // Check if interview is ended
+    if (session?.status === 'completed') {
+      toast.error('This interview has ended. You can no longer send messages.')
+      return
+    }
+    
     if (!input.trim() || loading || !submissionId) return
 
     const userMessage: Message = {
@@ -266,74 +588,174 @@ export default function CandidateInterview() {
     }
   }
 
+  // Map language to Monaco editor language
+  const getMonacoLanguage = (lang: string) => {
+    const langMap: Record<string, string> = {
+      python: 'python',
+      javascript: 'javascript',
+      c: 'c',
+      cpp: 'cpp',
+      java: 'java'
+    }
+    return langMap[lang] || 'python'
+  }
+
+  // Handle drag start for AI assistant
+  const handleDragStart = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.resize-handle')) return
+    setIsDragging(true)
+    setDragStart({
+      x: e.clientX - assistantPosition.x,
+      y: e.clientY - assistantPosition.y
+    })
+  }
+
+  // Handle resize start for AI assistant
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsResizingAssistant(true)
+  }
 
   return (
-    <div className="min-h-screen bg-gray-100 relative">
+    <div className="min-h-screen bg-gray-50 relative">
+      {/* Show banner if interview ended */}
+      {session?.status === 'completed' && (
+        <div className="fixed top-0 left-0 right-0 bg-yellow-500 text-white text-center py-2 z-50">
+          This interview has ended. You can no longer make changes.
+        </div>
+      )}
       {/* AI Chat Overlay - only show when editor is visible */}
       {showEditor && (
-        <div className="fixed bottom-4 right-4 z-50 w-80 h-96 bg-white border-2 border-indigo-500 rounded-lg shadow-lg flex flex-col">
-        <div className="bg-indigo-500 text-white p-3 font-semibold rounded-t-lg">
-          AI Interview Assistant
-        </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {messages.length === 0 && (
-            <div className="text-gray-500 text-center text-sm">
-              Type a message to start the interview!
-            </div>
-          )}
-          {messages.map((msg, idx) => (
-            <div
-              key={idx}
-              className={`text-sm ${
-                msg.role === 'user'
-                  ? 'text-right'
-                  : 'text-left'
-              }`}
-            >
+        <div
+          ref={assistantRef}
+          className="fixed z-50 bg-white border-2 border-indigo-500 rounded-lg shadow-lg flex flex-col"
+          style={{
+            left: `${assistantPosition.x}px`,
+            top: `${assistantPosition.y}px`,
+            width: `${assistantSize.width}px`,
+            height: `${assistantSize.height}px`
+          }}
+        >
+          <div
+            className="bg-indigo-500 text-white p-3 font-semibold rounded-t-lg cursor-move select-none"
+            onMouseDown={handleDragStart}
+          >
+            AI Interview Assistant
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {messages.length === 0 && (
+              <div className="text-gray-500 text-center text-sm">
+                Type a message to start the interview!
+              </div>
+            )}
+            {messages.map((msg, idx) => (
               <div
-                className={`inline-block max-w-64 p-2 rounded-lg ${
+                key={idx}
+                className={`text-sm ${
                   msg.role === 'user'
-                    ? 'bg-indigo-500 text-white'
-                    : 'bg-gray-200 text-gray-800'
+                    ? 'text-right'
+                    : 'text-left'
                 }`}
               >
-                {msg.content}
+                <div
+                  className={`inline-block max-w-64 p-2 rounded-lg ${
+                    msg.role === 'user'
+                      ? 'bg-indigo-500 text-white'
+                      : 'bg-gray-200 text-gray-800'
+                  }`}
+                >
+                  {msg.content}
+                </div>
               </div>
-            </div>
-          ))}
-          {loading && (
-            <div className="text-gray-500 text-sm">AI is thinking...</div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-        <div className="p-3 border-t flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="Ask about your code..."
-            className="flex-1 border border-gray-300 rounded px-3 py-1 text-sm"
-            disabled={loading}
+            ))}
+            {loading && (
+              <div className="text-gray-500 text-sm">AI is thinking...</div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+          <div className="p-3 border-t flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+              placeholder="Ask about your code..."
+              className="flex-1 border border-gray-300 rounded px-3 py-1 text-sm"
+              disabled={loading || session?.status === 'completed'}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={loading || !input.trim() || session?.status === 'completed'}
+              className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-400 text-white px-3 py-1 rounded text-sm"
+            >
+              Send
+            </button>
+          </div>
+          {/* Resize Handle */}
+          <div
+            ref={resizeHandleRef}
+            className="resize-handle absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize bg-indigo-500 opacity-50 hover:opacity-100 transition-opacity"
+            style={{
+              clipPath: 'polygon(100% 0, 0 100%, 100% 100%)'
+            }}
+            onMouseDown={handleResizeStart}
           />
-          <button
-            onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-400 text-white px-3 py-1 rounded text-sm"
-          >
-            Send
-          </button>
         </div>
-      </div>
       )}
 
       {/* Main Content */}
       <div className="h-screen flex flex-col">
-        <header className="bg-white shadow-sm py-4 px-6 z-10">
-          <h1 className="text-xl font-semibold text-gray-800">Live Coding Interview</h1>
-          {submissionId && (
-            <p className="text-sm text-gray-500">Session: {submissionId.slice(0, 8)}...</p>
-          )}
+        <header className="bg-white shadow-sm py-3 px-6 z-10 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold text-gray-800">
+                {interview?.job_title || 'Live Coding Interview'}
+              </h1>
+              {submissionId && (
+                <p className="text-xs text-gray-500">Session: {submissionId.slice(0, 8)}...</p>
+              )}
+            </div>
+            {showEditor && (
+              <div className="flex items-center gap-4">
+                {interviewTimeLimit && timeRemaining !== null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Time Remaining:</span>
+                    <span className={`text-sm font-semibold ${
+                      timeRemaining < 10 ? 'text-red-600' : 'text-gray-900'
+                    }`}>
+                      {timeRemaining} min
+                    </span>
+                  </div>
+                )}
+                <label className="text-sm font-medium text-gray-700">Language:</label>
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="python">Python</option>
+                  <option value="javascript">JavaScript</option>
+                  <option value="c">C</option>
+                  <option value="cpp">C++</option>
+                  <option value="java">Java</option>
+                </select>
+                {isSaving && (
+                  <span className="text-sm text-gray-500 flex items-center gap-2">
+                    <LoadingSpinner size="sm" />
+                    Saving...
+                  </span>
+                )}
+                {!isSaving && lastSaved && !saveError && (
+                  <span className="text-sm text-green-600">Saved</span>
+                )}
+                {saveError && (
+                  <span className="text-sm text-red-600" title={saveError}>
+                    Save failed
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </header>
 
         {/* Show form or editor based on state */}
@@ -399,74 +821,124 @@ export default function CandidateInterview() {
             </div>
           </div>
         ) : (
-          /* Coding Environment */
-          <div className="flex-1 flex flex-col bg-gray-50 p-4">
-            <div className="w-full h-full flex flex-col">
-              <div className="mb-4 flex items-center gap-4">
-                <label className="text-sm font-medium text-gray-700">Language:</label>
-                <select
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className="border border-gray-300 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="python">Python</option>
-                  <option value="javascript">JavaScript</option>
-                </select>
-                {isSaving && (
-                  <span className="text-sm text-gray-500 flex items-center gap-2">
-                    <LoadingSpinner size="sm" />
-                    Saving...
-                  </span>
-                )}
-                {!isSaving && lastSaved && !saveError && (
-                  <span className="text-sm text-green-600">Saved</span>
-                )}
-                {saveError && (
-                  <span className="text-sm text-red-600" title={saveError}>
-                    Save failed
-                  </span>
+          /* Coding Environment - CoderPad/HackerRank Style */
+          <div className="flex-1 flex overflow-hidden bg-gray-50">
+            {/* Question Panel - Resizable */}
+            <div
+              className="bg-white border-r border-gray-300 overflow-y-auto"
+              style={{ width: `${questionPanelWidth}px`, minWidth: '300px', maxWidth: '60%' }}
+            >
+              <div className="p-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Problem</h2>
+                
+                {interview?.instructions ? (
+                  <div className="prose max-w-none prose-headings:text-gray-900 prose-p:text-gray-700 prose-code:text-indigo-600 prose-pre:bg-gray-100 prose-pre:border prose-pre:border-gray-300 prose-pre:rounded">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {interview.instructions}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="text-gray-500 italic">
+                    No specific instructions provided. Please write code to solve the problem.
+                  </div>
                 )}
               </div>
-              <div className="flex-1 border border-gray-300 rounded-lg overflow-hidden mb-4">
-                <Editor
-                  height="100%"
-                  language={language}
-                  value={code}
-                  onChange={(value) => setCode(value || '')}
-                  theme="vs-dark"
-                  options={{
-                    fontSize: 14,
-                    minimap: { enabled: false },
-                    wordWrap: 'on' as const,
-                    automaticLayout: true
-                  }}
-                />
+            </div>
+
+            {/* Resize Handle */}
+            <div
+              ref={resizeRef}
+              onMouseDown={() => setIsResizing(true)}
+              className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors"
+              style={{ cursor: 'col-resize' }}
+            />
+
+            {/* Code Editor and Output Panel */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Code Editor */}
+              <div className="flex-1 border-b border-gray-300 overflow-hidden">
+                <div className="h-full">
+                  <Editor
+                    height="100%"
+                    language={getMonacoLanguage(language)}
+                    value={code}
+                    onChange={(value) => {
+                      // Disable editing if interview ended
+                      if (session?.status === 'completed') {
+                        toast.error('This interview has ended.')
+                        return
+                      }
+                      setCode(value || '')
+                    }}
+                    theme="vs-dark"
+                    options={{
+                      fontSize: 14,
+                      minimap: { enabled: false },
+                      wordWrap: 'on' as const,
+                      automaticLayout: true,
+                      scrollBeyondLastLine: false,
+                      padding: { top: 16, bottom: 16 },
+                      readOnly: session?.status === 'completed' // Disable editing
+                    }}
+                  />
+                </div>
               </div>
-              
-              {/* Run Code Button */}
-              <button
-                onClick={handleRunCode}
-                disabled={isExecuting || !code.trim()}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold py-2 px-6 rounded-lg transition duration-200 mb-4 self-start flex items-center gap-2"
-              >
-                {isExecuting && <LoadingSpinner size="sm" />}
-                {isExecuting ? 'Running...' : 'Run Code'}
-              </button>
 
               {/* Output Panel */}
-              <div className="border border-gray-300 rounded-lg bg-white">
-                <div className="p-4 font-mono text-sm overflow-y-auto max-h-64 min-h-[100px] whitespace-pre-wrap">
+              <div className="h-64 bg-gray-900 border-t border-gray-700 flex flex-col">
+                <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-300">Output</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleRunCode}
+                      disabled={isExecuting || !code.trim() || session?.status === 'completed'}
+                      className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-1.5 rounded transition duration-200 flex items-center gap-2"
+                    >
+                      {isExecuting ? (
+                        <>
+                          <LoadingSpinner size="sm" />
+                          Running...
+                        </>
+                      ) : (
+                        '▶ Run Code'
+                      )}
+                    </button>
+                    {submissionId && session?.status !== 'completed' && (
+                      <button
+                        onClick={handleSubmitInterview}
+                        disabled={isSubmittingInterview}
+                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-1.5 rounded transition duration-200 flex items-center gap-2"
+                      >
+                        {isSubmittingInterview ? (
+                          <>
+                            <LoadingSpinner size="sm" />
+                            Submitting...
+                          </>
+                        ) : (
+                          '✓ Submit Interview'
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
                   {isExecuting ? (
-                    <div className="text-blue-600 flex items-center gap-2">
+                    <div className="text-blue-400 flex items-center gap-2 font-mono text-sm">
                       <LoadingSpinner size="sm" />
-                      Running...
+                      Running code...
                     </div>
                   ) : executionSuccess === true ? (
-                    <div className="text-green-600">{output || '(No output)'}</div>
+                    <pre className="text-green-400 font-mono text-sm whitespace-pre-wrap">
+                      {output || '(No output)'}
+                    </pre>
                   ) : executionSuccess === false ? (
-                    <div className="text-red-600">{executionError || 'Execution failed'}</div>
+                    <pre className="text-red-400 font-mono text-sm whitespace-pre-wrap">
+                      {executionError || 'Execution failed'}
+                    </pre>
                   ) : (
-                    <div className="text-gray-400">Output will appear here after running code</div>
+                    <div className="text-gray-500 font-mono text-sm">
+                      Click "Run Code" to execute your code. Output will appear here.
+                    </div>
                   )}
                 </div>
               </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { UserButton, useAuth } from '@clerk/clerk-react'
 import toast from 'react-hot-toast'
 import LoadingSpinner from '../components/LoadingSpinner.tsx'
@@ -16,19 +17,12 @@ interface Session {
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
-  const [newSessionId, setNewSessionId] = useState<string | null>(null)
-  const [candidateLink, setCandidateLink] = useState('')
-  const [isCreatingSession, setIsCreatingSession] = useState(false)
   const [isEndingInterview, setIsEndingInterview] = useState<string | null>(null)
   const [candidateCounts, setCandidateCounts] = useState<Map<string, number>>(new Map())
   const [loadingInterviews, setLoadingInterviews] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [jobTitle, setJobTitle] = useState('')
-  const [jobDescription, setJobDescription] = useState('')
-  const [instructions, setInstructions] = useState('')
-  const [showForm, setShowForm] = useState(false)
-  const [formErrors, setFormErrors] = useState<{ jobTitle?: string }>({})
   const { getToken } = useAuth()
+  const navigate = useNavigate()
 
   // Fetch interviews on mount
   useEffect(() => {
@@ -97,71 +91,6 @@ export default function Dashboard() {
     setCandidateCounts(counts)
   }
 
-  const resetForm = () => {
-    setJobTitle('')
-    setJobDescription('')
-    setInstructions('')
-    setFormErrors({})
-    setShowForm(false)
-  }
-
-  const createSession = async () => {
-    if (isCreatingSession) return
-
-    // Validate form
-    const errors: { jobTitle?: string } = {}
-    if (!jobTitle.trim()) {
-      errors.jobTitle = 'Job title is required'
-      setFormErrors(errors)
-      return
-    }
-
-    setIsCreatingSession(true)
-    setFormErrors({})
-    
-    try {
-      const token = await getToken()
-      const response = await fetch(`${BACKEND_URL}/api/generate-session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          jobTitle: jobTitle.trim(),
-          jobDescription: jobDescription.trim() || undefined,
-          instructions: instructions.trim() || undefined
-        })
-      })
-      if (!response.ok) {
-        const errorMessage = await parseApiError(response)
-        throw new Error(errorMessage)
-      }
-
-      const data = await response.json()
-      setNewSessionId(data.sessionId)
-
-      // Refresh interviews list to get the new interview with all details
-      await fetchInterviews()
-
-      // Update the candidate link display
-      if (data.candidateLink) {
-        setCandidateLink(data.candidateLink)
-      }
-
-      // Reset form after successful creation
-      resetForm()
-      toast.success('Interview created successfully!')
-    } catch (error) {
-      const errorMessage = handleApiError(error)
-      toast.error(errorMessage)
-      console.error('Failed to create session:', error)
-    } finally {
-      setIsCreatingSession(false)
-    }
-  }
-
-
   const endInterview = async (sessionId: string) => {
     if (isEndingInterview) return
 
@@ -181,14 +110,17 @@ export default function Dashboard() {
         throw new Error(errorMessage)
       }
 
-      const evaluation = await response.json()
+      const result = await response.json()
 
-      // Refresh interviews to get updated status
+      // Refresh interviews immediately to show it moved to past interviews
       await fetchInterviews()
 
-      // Show evaluation results
-      toast.success(`Interview Complete! Score: ${evaluation.score}/100`)
-      alert(`Interview Complete!\n\nScore: ${evaluation.score}/100\nSummary: ${evaluation.summary}`)
+      // Show success message
+      if (result.status === 'evaluating') {
+        toast.success('Interview ended. Evaluation in progress...')
+      } else {
+        toast.success(`Interview Complete! Score: ${result.score}/100`)
+      }
     } catch (error) {
       const errorMessage = handleApiError(error)
       toast.error(errorMessage)
@@ -202,134 +134,27 @@ export default function Dashboard() {
   const pastSessions = sessions.filter(s => s.status === 'completed')
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+      <nav className="fixed top-0 w-full bg-white/80 backdrop-blur-md border-b border-gray-200 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <h1 className="text-2xl font-bold text-gray-900">AI Interview Tool</h1>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              AI Interview
+            </h1>
             <UserButton afterSignOutUrl="/sign-in" />
           </div>
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 pt-24">
         <div className="px-4 py-6 sm:px-0">
           <div className="mb-8">
-            {!showForm ? (
-              <button
-                onClick={() => setShowForm(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
-              >
-                New Interview
-              </button>
-            ) : (
-              <div className="bg-white shadow rounded-lg p-6 max-w-2xl">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">Create New Interview</h2>
-                
-                <form onSubmit={(e) => { e.preventDefault(); createSession(); }}>
-                  <div className="space-y-4">
-                    <div>
-                      <label htmlFor="jobTitle" className="block text-sm font-medium text-gray-700 mb-1">
-                        Job Title <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        id="jobTitle"
-                        type="text"
-                        value={jobTitle}
-                        onChange={(e) => {
-                          setJobTitle(e.target.value)
-                          if (formErrors.jobTitle) {
-                            setFormErrors({})
-                          }
-                        }}
-                        className={`w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                          formErrors.jobTitle ? 'border-red-500' : 'border-gray-300'
-                        }`}
-                        placeholder="e.g., Senior Software Engineer"
-                        disabled={isCreatingSession}
-                      />
-                      {formErrors.jobTitle && (
-                        <p className="mt-1 text-sm text-red-600">{formErrors.jobTitle}</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label htmlFor="jobDescription" className="block text-sm font-medium text-gray-700 mb-1">
-                        Job Description <span className="text-gray-500 text-xs">(optional)</span>
-                      </label>
-                      <textarea
-                        id="jobDescription"
-                        value={jobDescription}
-                        onChange={(e) => setJobDescription(e.target.value)}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Describe the role, requirements, and responsibilities..."
-                        rows={4}
-                        disabled={isCreatingSession}
-                      />
-                    </div>
-
-                    <div>
-                      <label htmlFor="instructions" className="block text-sm font-medium text-gray-700 mb-1">
-                        Instructions <span className="text-gray-500 text-xs">(optional)</span>
-                      </label>
-                      <textarea
-                        id="instructions"
-                        value={instructions}
-                        onChange={(e) => setInstructions(e.target.value)}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="These instructions will be shown to candidates..."
-                        rows={3}
-                        disabled={isCreatingSession}
-                      />
-                      <p className="mt-1 text-xs text-gray-500">
-                        These instructions will be shown to candidates
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 flex gap-3">
-                    <button
-                      type="submit"
-                      disabled={isCreatingSession}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 flex items-center gap-2"
-                    >
-                      {isCreatingSession && <LoadingSpinner size="sm" />}
-                      {isCreatingSession ? 'Creating...' : 'Create Interview'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={resetForm}
-                      disabled={isCreatingSession}
-                      className="bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-700 font-semibold py-2 px-4 rounded-lg transition duration-200"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-            
-            {newSessionId && candidateLink && (
-              <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-sm font-medium text-gray-700 mb-2">
-                  Interview session created! Share this link with the candidate:
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={candidateLink}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
-                  />
-                  <button
-                    onClick={() => navigator.clipboard.writeText(candidateLink)}
-                    className="bg-white border border-gray-300 px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-50"
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            )}
+            <button
+              onClick={() => navigate('/create-interview')}
+              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:opacity-90 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
+            >
+              New Interview
+            </button>
           </div>
 
           {error && (
@@ -369,6 +194,9 @@ export default function Dashboard() {
                         Candidates
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Interview Link
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Actions
                       </th>
                     </tr>
@@ -384,6 +212,27 @@ export default function Dashboard() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {candidateCounts.get(session.id) ?? '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={`${window.location.origin}/interview/${session.uniqueLink}`}
+                              className="px-2 py-1 border border-gray-300 rounded text-xs w-64"
+                              onClick={(e) => (e.target as HTMLInputElement).select()}
+                            />
+                            <button
+                              onClick={() => {
+                                const link = `${window.location.origin}/interview/${session.uniqueLink}`
+                                navigator.clipboard.writeText(link)
+                                toast.success('Link copied to clipboard!')
+                              }}
+                              className="bg-white border border-gray-300 px-2 py-1 rounded text-xs font-medium hover:bg-gray-50"
+                            >
+                              Copy
+                            </button>
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <a
@@ -438,7 +287,11 @@ export default function Dashboard() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {pastSessions.map((session) => (
-                      <tr key={session.id}>
+                      <tr 
+                        key={session.id}
+                        onClick={() => window.location.href = `/interview/${session.id}/details`}
+                        className="cursor-pointer hover:bg-gray-50 transition-colors"
+                      >
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {session.jobTitle}
                         </td>

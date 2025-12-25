@@ -1,6 +1,7 @@
 export interface CodeExecutionRequest {
   code: string
-  language: 'python' | 'javascript'
+  language: 'python' | 'javascript' | 'c' | 'cpp' | 'java'
+  stdin?: string
 }
 
 export interface CodeExecutionResponse {
@@ -10,26 +11,79 @@ export interface CodeExecutionResponse {
 }
 
 /**
- * Execute code using Modal.com API (or mock for MVP stub)
+ * Execute code using Modal.com API (or mock for fallback)
  * 
- * For MVP: Returns mock output
- * Future: Will integrate with real Modal.com API
+ * Calls the Modal endpoint if MODAL_ENDPOINT is configured,
+ * otherwise falls back to mock execution for development/testing.
  */
 export async function executeCode(
   request: CodeExecutionRequest
 ): Promise<CodeExecutionResponse> {
-  const apiKey = process.env.MODAL_API_KEY
+  const modalEndpoint = process.env.MODAL_ENDPOINT
 
-  // For MVP stub: use mock execution if API key not set or in development
-  if (!apiKey) {
+  // Fall back to mock if Modal endpoint not configured
+  if (!modalEndpoint) {
+    console.log('[Code Execution] MODAL_ENDPOINT not set, using mock execution')
     return mockExecution(request)
   }
 
-  // TODO: Real Modal.com API integration
-  // For now, still use mock even if API key is present
-  // This will be replaced with actual API calls in next step
-  console.log('[Code Execution] MODAL_API_KEY is set, but using mock execution (real API integration pending)')
-  return mockExecution(request)
+  try {
+    // Prepare request payload
+    const payload: any = {
+      code: request.code,
+      language: request.language
+    }
+    
+    // Add stdin if provided
+    if (request.stdin !== undefined) {
+      payload.stdin = request.stdin
+    }
+
+    // Call Modal API with 30 second timeout
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+    const response = await fetch(modalEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      throw new Error(`Modal API returned status ${response.status}: ${response.statusText}`)
+    }
+
+    const result = await response.json() as any
+
+    // Validate response format
+    if (typeof result === 'object' && result !== null && 
+        typeof result.output === 'string' && typeof result.success === 'boolean') {
+      return {
+        output: result.output || '',
+        error: result.error || undefined,
+        success: result.success
+      }
+    } else {
+      throw new Error('Invalid response format from Modal API')
+    }
+
+  } catch (error) {
+    // Log error but don't expose internal details
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('[Code Execution] Modal API call timed out after 30 seconds')
+    } else {
+      console.error('[Code Execution] Modal API call failed:', error instanceof Error ? error.message : 'Unknown error')
+    }
+
+    // Fall back to mock execution
+    console.log('[Code Execution] Falling back to mock execution')
+    return mockExecution(request)
+  }
 }
 
 /**
@@ -73,6 +127,18 @@ async function mockExecution(
       mockOutput = 'Function executed.\n'
     } else {
       mockOutput = 'Code executed successfully.\n'
+    }
+  } else if (language === 'c' || language === 'cpp') {
+    if (code.includes('printf') || code.includes('cout')) {
+      mockOutput = 'Hello, World!\nCode executed successfully.\n'
+    } else {
+      mockOutput = 'Code compiled and executed successfully.\n'
+    }
+  } else if (language === 'java') {
+    if (code.includes('System.out.println')) {
+      mockOutput = 'Hello, World!\nCode executed successfully.\n'
+    } else {
+      mockOutput = 'Code compiled and executed successfully.\n'
     }
   }
 

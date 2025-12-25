@@ -77,15 +77,16 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
 
   try {
     const result = await db.query<Interview>(
-      `INSERT INTO interviews (company_id, job_title, job_description, instructions, unique_link)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO interviews (company_id, job_title, job_description, instructions, unique_link, time_limit_minutes)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         input.company_id,
         input.job_title,
         input.job_description || null,
         input.instructions || null,
-        input.unique_link
+        input.unique_link,
+        input.time_limit_minutes || 60
       ]
     )
 
@@ -155,15 +156,16 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Su
 
   try {
     const result = await db.query<Submission>(
-      `INSERT INTO submissions (interview_id, candidate_name, candidate_email, code, language)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO submissions (interview_id, candidate_name, candidate_email, code, language, started_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         input.interview_id,
         input.candidate_name,
         input.candidate_email,
         input.code || null,
-        input.language || null
+        input.language || null,
+        input.started_at || new Date().toISOString()
       ]
     )
 
@@ -190,6 +192,25 @@ export async function getSubmissionById(id: string): Promise<Submission | null> 
     return result.rows.length > 0 ? result.rows[0] : null
   } catch (error) {
     console.error('Error in getSubmissionById:', error)
+    throw error
+  }
+}
+
+export async function getSubmissionByEmailAndInterview(
+  email: string,
+  interviewId: string
+): Promise<Submission | null> {
+  const db = getDb()
+
+  try {
+    const result = await db.query<Submission>(
+      'SELECT * FROM submissions WHERE candidate_email = $1 AND interview_id = $2 ORDER BY started_at DESC LIMIT 1',
+      [email, interviewId]
+    )
+
+    return result.rows.length > 0 ? result.rows[0] : null
+  } catch (error) {
+    console.error('Error in getSubmissionByEmailAndInterview:', error)
     throw error
   }
 }
@@ -241,11 +262,19 @@ export async function updateSubmissionStatus(id: string, status: string): Promis
   const db = getDb()
 
   try {
+    // If marking as completed, also set submitted_at
+    const query = status === 'completed'
+      ? `UPDATE submissions
+         SET status = $1, submitted_at = NOW()
+         WHERE id = $2
+         RETURNING *`
+      : `UPDATE submissions
+         SET status = $1
+         WHERE id = $2
+         RETURNING *`
+
     const result = await db.query<Submission>(
-      `UPDATE submissions
-       SET status = $1
-       WHERE id = $2
-       RETURNING *`,
+      query,
       [status, id]
     )
 
@@ -267,10 +296,10 @@ export async function addChatMessage(input: AddChatMessageInput): Promise<ChatMe
 
   try {
     const result = await db.query<ChatMessage>(
-      `INSERT INTO chat_messages (submission_id, session_id, sender, message)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO chat_messages (submission_id, session_id, sender, message, is_probing_question)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [input.submission_id, input.session_id, input.sender, input.message]
+      [input.submission_id, input.session_id, input.sender, input.message, input.is_probing_question || false]
     )
 
     if (result.rows.length === 0) {
@@ -306,7 +335,10 @@ export async function createAIAnalysis(input: CreateAIAnalysisInput): Promise<AI
   const db = getDb()
 
   try {
-    // pg library automatically converts JavaScript arrays/objects to JSONB
+    // Explicitly stringify arrays to ensure proper JSON format for PostgreSQL JSONB
+    const strengthsJson = JSON.stringify(input.strengths || [])
+    const improvementsJson = JSON.stringify(input.improvements || [])
+    
     const result = await db.query<{
       id: string
       submission_id: string
@@ -323,8 +355,8 @@ export async function createAIAnalysis(input: CreateAIAnalysisInput): Promise<AI
         input.submission_id,
         input.score,
         input.summary,
-        input.strengths,
-        input.improvements
+        strengthsJson,
+        improvementsJson
       ]
     )
 

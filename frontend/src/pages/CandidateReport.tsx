@@ -16,6 +16,7 @@ interface Submission {
   code: string | null
   language: string | null
   submitted_at: string
+  started_at: string | null
   status: string
 }
 
@@ -168,6 +169,14 @@ export default function CandidateReport() {
 
   const { submission, messages, analysis } = reportData
 
+  // Calculate time taken
+  const timeTaken = submission.started_at && submission.submitted_at
+    ? Math.round(
+        (new Date(submission.submitted_at).getTime() - 
+         new Date(submission.started_at).getTime()) / 1000 / 60
+      )
+    : null
+
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
@@ -198,6 +207,12 @@ export default function CandidateReport() {
                 <p className="text-sm font-medium text-gray-500">Email</p>
                 <p className="text-lg text-gray-900">{submission.candidate_email}</p>
               </div>
+              {timeTaken !== null && (
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Time Taken</p>
+                  <p className="text-lg text-gray-900">{timeTaken} minutes</p>
+                </div>
+              )}
               <div>
                 <p className="text-sm font-medium text-gray-500">Submitted At</p>
                 <p className="text-lg text-gray-900">{new Date(submission.submitted_at).toLocaleString()}</p>

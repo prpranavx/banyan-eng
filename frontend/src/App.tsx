@@ -2,11 +2,14 @@ import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/cle
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
+import LandingPage from './pages/LandingPage.tsx'
 import Dashboard from './pages/Dashboard.tsx'
 import SignInPage from './pages/SignInPage.tsx'
+import CreateInterview from './pages/CreateInterview.tsx'
 import CandidateInterview from './pages/CandidateInterview.tsx'
 import CandidateList from './pages/CandidateList.tsx'
 import CandidateReport from './pages/CandidateReport.tsx'
+import InterviewDetails from './pages/InterviewDetails.tsx'
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
@@ -32,11 +35,20 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/sign-in/*" element={<SignInPage />} />
+            <Route path="/" element={<LandingPage />} />
             <Route
-              path="/"
+              path="/dashboard"
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/create-interview"
+              element={
+                <ProtectedRoute>
+                  <CreateInterview />
                 </ProtectedRoute>
               }
             />
@@ -54,6 +66,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <CandidateReport />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/interview/:interviewId/details"
+              element={
+                <ProtectedRoute>
+                  <InterviewDetails />
                 </ProtectedRoute>
               }
             />

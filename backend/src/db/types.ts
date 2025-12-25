@@ -14,6 +14,7 @@ export interface Interview {
   job_description: string | null
   instructions: string | null
   unique_link: string
+  time_limit_minutes: number | null
   created_at: string
 }
 
@@ -25,6 +26,7 @@ export interface Submission {
   code: string | null
   language: string | null
   submitted_at: string
+  started_at: string | null
   status: string
 }
 
@@ -35,6 +37,7 @@ export interface ChatMessage {
   sender: string
   message: string
   timestamp: string
+  is_probing_question: boolean
 }
 
 export interface AIAnalysis {
@@ -60,6 +63,7 @@ export interface CreateInterviewInput {
   job_description?: string
   instructions?: string
   unique_link: string
+  time_limit_minutes?: number
 }
 
 export interface CreateSubmissionInput {
@@ -68,6 +72,7 @@ export interface CreateSubmissionInput {
   candidate_email: string
   code?: string
   language?: string
+  started_at?: string
 }
 
 export interface AddChatMessageInput {
@@ -75,6 +80,7 @@ export interface AddChatMessageInput {
   session_id: string
   sender: string
   message: string
+  is_probing_question?: boolean
 }
 
 export interface CreateAIAnalysisInput {
