@@ -10,6 +10,7 @@ import CandidateInterview from './pages/CandidateInterview.tsx'
 import CandidateList from './pages/CandidateList.tsx'
 import CandidateReport from './pages/CandidateReport.tsx'
 import InterviewDetails from './pages/InterviewDetails.tsx'
+import Pricing from './pages/Pricing.tsx'
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
@@ -31,11 +32,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <ErrorBoundary>
-      <ClerkProvider publishableKey={clerkPubKey}>
+      <ClerkProvider 
+        publishableKey={clerkPubKey}
+        signOutFallbackRedirectUrl="/"
+      >
         <BrowserRouter>
           <Routes>
             <Route path="/sign-in/*" element={<SignInPage />} />
             <Route path="/" element={<LandingPage />} />
+            <Route path="/pricing" element={<Pricing />} />
             <Route
               path="/dashboard"
               element={

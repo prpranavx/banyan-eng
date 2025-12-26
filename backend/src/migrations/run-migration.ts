@@ -38,6 +38,14 @@ async function runMigration() {
     await db.query(sql003)
     console.log('✅ Migration 003 completed')
 
+    // Run migration 004
+    const migration004Path = join(__dirname, '004_add_subscriptions_and_credits.sql')
+    console.log(`📄 Reading migration file: ${migration004Path}`)
+    const sql004 = readFileSync(migration004Path, 'utf-8')
+    console.log('⚙️  Executing migration 004...')
+    await db.query(sql004)
+    console.log('✅ Migration 004 completed')
+
     console.log('✅ All migrations completed successfully!')
     process.exit(0)
   } catch (error) {

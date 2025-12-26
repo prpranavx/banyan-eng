@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Starting CodePair System Test..."
+echo "🚀 Starting codepair System Test..."
 
 # Colors for output
 RED='\033[0;31m'

@@ -4,6 +4,12 @@ export interface Company {
   id: string
   clerk_user_id: string
   company_name: string
+  plan: 'free' | 'pro' | 'enterprise'
+  credits_remaining: number
+  lemon_squeezy_customer_id: string | null
+  lemon_squeezy_subscription_id: string | null
+  trial_ends_at: string | null
+  subscription_status: 'free' | 'active' | 'canceled' | 'past_due' | 'trialing'
   created_at: string
 }
 
@@ -91,5 +97,12 @@ export interface CreateAIAnalysisInput {
   summary: string
   strengths: string[]
   improvements: string[]
+}
+
+// Credit management types
+export interface CreditCheckResult {
+  allowed: boolean
+  creditsRemaining: number
+  reason?: string
 }
 

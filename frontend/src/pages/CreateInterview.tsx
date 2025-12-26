@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import ReactMarkdown from 'react-markdown'
@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import Editor from '@monaco-editor/react'
 import toast from 'react-hot-toast'
 import LoadingSpinner from '../components/LoadingSpinner.tsx'
+import UpgradePrompt from '../components/UpgradePrompt.tsx'
 import { handleApiError, parseApiError } from '../utils/apiErrorHandler.ts'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'
@@ -169,8 +170,36 @@ export default function CreateInterview() {
   const [selectedTemplate, setSelectedTemplate] = useState('custom')
   const [formErrors, setFormErrors] = useState<{ jobTitle?: string }>({})
   const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null)
+  const [plan, setPlan] = useState<'free' | 'pro' | 'enterprise'>('free')
+  const [trialExpired, setTrialExpired] = useState(false)
   const { getToken } = useAuth()
   const navigate = useNavigate()
+
+  // Fetch credits on mount
+  useEffect(() => {
+    fetchCredits()
+  }, [])
+
+  const fetchCredits = async () => {
+    try {
+      const token = await getToken()
+      const response = await fetch(`${BACKEND_URL}/api/credits`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setCreditsRemaining(data.creditsRemaining)
+        setPlan(data.plan)
+        setTrialExpired(data.trialExpired)
+      }
+    } catch (error) {
+      console.error('Failed to fetch credits:', error)
+    }
+  }
 
   const handleTemplateChange = (templateId: string) => {
     setSelectedTemplate(templateId)
@@ -182,6 +211,17 @@ export default function CreateInterview() {
 
   const createSession = async () => {
     if (isCreatingSession) return
+
+    // Check credits before allowing creation (skip check for unlimited/enterprise)
+    if (creditsRemaining !== null && creditsRemaining <= 0 && plan !== 'enterprise') {
+      toast.error('You have no credits remaining. Please upgrade to continue.')
+      return
+    }
+
+    if (trialExpired) {
+      toast.error('Your free trial has expired. Please upgrade to continue.')
+      return
+    }
 
     // Validate form
     const errors: { jobTitle?: string } = {}
@@ -211,11 +251,25 @@ export default function CreateInterview() {
         })
       })
       if (!response.ok) {
-        const errorMessage = await parseApiError(response)
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || await parseApiError(response)
+        
+        // Handle upgrade required error
+        if (response.status === 403 && errorData.upgradeRequired) {
+          toast.error(errorMessage)
+          navigate('/pricing')
+          return
+        }
+        
         throw new Error(errorMessage)
       }
 
       const data = await response.json()
+      
+      // Update credits if returned
+      if (data.creditsRemaining !== undefined) {
+        setCreditsRemaining(data.creditsRemaining)
+      }
       
       // Show success toast with candidate link
       if (data.candidateLink) {
@@ -280,6 +334,38 @@ export default function CreateInterview() {
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 pt-24">
         <div className="px-4 py-6 sm:px-0">
+          {/* Credits Display */}
+          {creditsRemaining !== null && (
+            <div className="mb-6 bg-white rounded-lg shadow p-4 border-l-4 border-blue-600">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Credits Remaining</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {creditsRemaining === -1 ? 'Unlimited' : creditsRemaining}
+                  </p>
+                </div>
+                {creditsRemaining === 0 && plan !== 'enterprise' && (
+                  <button
+                    onClick={() => navigate('/pricing')}
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    Upgrade to Pro
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Upgrade Prompt */}
+          {(creditsRemaining === 0 || trialExpired) && plan !== 'enterprise' && (
+            <UpgradePrompt 
+              message={trialExpired 
+                ? "Your free trial has expired. Upgrade to continue creating interviews."
+                : "You've used all your interview credits. Upgrade to continue."
+              }
+            />
+          )}
+
           <div className="bg-white shadow rounded-lg p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Interview Details</h2>
             

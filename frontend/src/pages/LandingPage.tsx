@@ -1,4 +1,4 @@
-import { SignInButton, SignUpButton, SignedIn, SignedOut } from '@clerk/clerk-react'
+import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
 
 export default function LandingPage() {
@@ -12,10 +12,16 @@ export default function LandingPage() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                CodePair
+                codepair
               </h1>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate('/pricing')}
+                className="text-gray-700 hover:text-gray-900 px-4 py-2 font-medium transition-colors"
+              >
+                Pricing
+              </button>
               <SignedOut>
                 <SignInButton mode="modal">
                   <button className="text-gray-700 hover:text-gray-900 px-4 py-2 font-medium transition-colors">
@@ -24,7 +30,7 @@ export default function LandingPage() {
                 </SignInButton>
                 <SignUpButton mode="modal">
                   <button className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:opacity-90 transition-opacity">
-                    Get Started
+                    Get Started Free
                   </button>
                 </SignUpButton>
               </SignedOut>
@@ -35,6 +41,7 @@ export default function LandingPage() {
                 >
                   Go to Dashboard
                 </button>
+                <UserButton afterSignOutUrl="/" />
               </SignedIn>
             </div>
           </div>
@@ -63,14 +70,15 @@ export default function LandingPage() {
               <SignedOut>
                 <SignUpButton mode="modal">
                   <button className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:opacity-90 transition-opacity shadow-lg">
-                    Sign Up
+                    Start Free Trial
                   </button>
                 </SignUpButton>
-                <SignInButton mode="modal">
-                  <button className="bg-white text-gray-700 px-8 py-4 rounded-lg text-lg font-semibold border-2 border-gray-300 hover:border-gray-400 transition-colors">
-                    Sign In
-                  </button>
-                </SignInButton>
+                <button
+                  onClick={() => navigate('/pricing')}
+                  className="bg-white text-gray-700 px-8 py-4 rounded-lg text-lg font-semibold border-2 border-gray-300 hover:border-gray-400 transition-colors"
+                >
+                  View Pricing
+                </button>
               </SignedOut>
               <SignedIn>
                 <button
@@ -190,12 +198,12 @@ export default function LandingPage() {
             Save your senior engineers' time
           </h2>
           <p className="text-xl text-blue-100 mb-8">
-            Start screening candidates efficiently with job-tailored interviews. Free during beta.
+            Start screening candidates efficiently with job-tailored interviews. 3 free interviews, no credit card required.
           </p>
           <SignedOut>
             <SignUpButton mode="modal">
               <button className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-gray-50 transition-colors shadow-lg">
-                Get Started Free
+                Start Free Trial
               </button>
             </SignUpButton>
           </SignedOut>
@@ -213,7 +221,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="bg-gray-900 text-gray-400 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
-          <p>&copy; 2025 CodePair. All rights reserved.</p>
+          <p>&copy; 2025 codepair. All rights reserved.</p>
         </div>
       </footer>
     </div>

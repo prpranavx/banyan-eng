@@ -6,6 +6,8 @@ import { clerkClient } from '@clerk/clerk-sdk-node'
 import type { Session, SendMessageRequest, EvaluateRequest, EvaluationResult } from './types.js'
 import type { Interview, Submission } from './db/types.js'
 import { getDb } from './db.js'
+import type { AuthenticatedRequest } from './types.js'
+import { getClerkUserId } from './utils/auth.js'
 import {
   getOrCreateCompany,
   getCompanyByClerkId,
@@ -14,6 +16,9 @@ import {
   getInterviewByLink,
   getInterviewsByCompany,
   deleteInterview,
+  checkAndDecrementCredits,
+  getCompanyWithCredits,
+  resetMonthlyCredits,
   createSubmission,
   getSubmissionById,
   getSubmissionByEmailAndInterview,
@@ -250,7 +255,7 @@ const requireAuth = async (req: express.Request, res: express.Response, next: ex
       return res.status(401).json({ error: 'Unauthorized - Invalid token' })
     }
 
-    (req as any).auth = decoded
+    ;(req as AuthenticatedRequest).auth = decoded
     next()
   } catch (error) {
     console.error('Auth error:', error)
@@ -259,19 +264,20 @@ const requireAuth = async (req: express.Request, res: express.Response, next: ex
 }
 
 app.post('/api/generate-session', requireAuth, async (req, res) => {
+  // Get a database client for transaction
+  const client = await getDb().connect()
+  
   try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unable to identify user' })
-    }
+    await client.query('BEGIN')
+    
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
 
     // Get or create company
     // Ensure we always have a company name (fallback chain with validation)
     let companyName = req.body.companyName
     if (!companyName || companyName.trim() === '') {
-      companyName = auth.emailAddresses?.[0]?.emailAddress
+      companyName = authReq.auth.emailAddresses?.[0]?.emailAddress
     }
     if (!companyName || companyName.trim() === '') {
       companyName = 'My Company'
@@ -280,16 +286,28 @@ app.post('/api/generate-session', requireAuth, async (req, res) => {
     // Final validation - should never be empty at this point
     if (!companyName || companyName.trim() === '') {
       console.error('Failed to determine company name for user:', clerkUserId)
+      await client.query('ROLLBACK')
       return res.status(400).json({ error: 'Unable to determine company name. Please provide a company name.' })
     }
     
     const company = await getOrCreateCompany(clerkUserId, companyName.trim())
 
+    // Check and decrement credits atomically (using transaction client)
+    const creditCheck = await checkAndDecrementCredits(company.id, client)
+    if (!creditCheck.allowed) {
+      await client.query('ROLLBACK')
+      return res.status(403).json({
+        error: creditCheck.reason,
+        creditsRemaining: creditCheck.creditsRemaining,
+        upgradeRequired: true
+      })
+    }
+
     // Generate unique link for the interview
     const uniqueLink = uuidv4()
     const jobTitle = req.body.jobTitle || 'Coding Interview'
 
-    // Create interview
+    // Create interview (using transaction client)
     const interview = await createInterview({
       company_id: company.id,
       job_title: jobTitle,
@@ -298,16 +316,25 @@ app.post('/api/generate-session', requireAuth, async (req, res) => {
       unique_link: uniqueLink,
       time_limit_minutes: req.body.timeLimitMinutes || 60,
       starter_code: req.body.starterCode || null
-    })
+    }, client)
 
+    await client.query('COMMIT')
+    
     console.log(`Created new interview: ${interview.id}`)
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5000'
     const candidateLink = `${frontendUrl}/interview/${interview.unique_link}`
-    res.json({ sessionId: interview.id, candidateLink })
+    res.json({ 
+      sessionId: interview.id, 
+      candidateLink,
+      creditsRemaining: creditCheck.creditsRemaining
+    })
   } catch (error) {
+    await client.query('ROLLBACK')
     console.error('Error in generate-session:', error)
     res.status(500).json({ error: 'Internal server error' })
+  } finally {
+    client.release()
   }
 })
 
@@ -1051,12 +1078,8 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
 
 app.get('/api/sessions', requireAuth, async (req, res) => {
   try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unable to identify user' })
-    }
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
 
     // Get company by Clerk ID
     const company = await getCompanyByClerkId(clerkUserId)
@@ -1152,12 +1175,8 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
 
 app.delete('/api/interviews/:interviewId', requireAuth, async (req, res) => {
   try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unable to identify user' })
-    }
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
 
     // Get company by Clerk ID
     const company = await getCompanyByClerkId(clerkUserId)
@@ -1177,6 +1196,43 @@ app.delete('/api/interviews/:interviewId', requireAuth, async (req, res) => {
     res.json({ success: true })
   } catch (error) {
     console.error('Error in delete interview:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+app.get('/api/credits', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
+
+    // Get company by Clerk ID
+    const company = await getCompanyByClerkId(clerkUserId)
+    if (!company) {
+      return res.status(404).json({ error: 'Company not found' })
+    }
+
+    // Check if trial expired
+    let trialExpired = false
+    let daysUntilTrialExpires: number | null = null
+    if (company.plan === 'free' && company.trial_ends_at) {
+      const trialEnd = new Date(company.trial_ends_at)
+      const now = new Date()
+      trialExpired = trialEnd < now
+      if (!trialExpired) {
+        daysUntilTrialExpires = Math.ceil((trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      }
+    }
+
+    res.json({
+      creditsRemaining: company.credits_remaining,
+      plan: company.plan,
+      subscriptionStatus: company.subscription_status,
+      trialExpired,
+      daysUntilTrialExpires,
+      trialEndsAt: company.trial_ends_at
+    })
+  } catch (error) {
+    console.error('Error in get credits:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -1203,13 +1259,9 @@ app.get('/api/interviews/:interviewId/candidates', requireAuth, async (req, res)
 
 app.get('/api/interviews/:interviewId/submissions', requireAuth, async (req, res) => {
   try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
     const { interviewId } = req.params
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unable to identify user' })
-    }
 
     // Get company by Clerk ID
     const company = await getCompanyByClerkId(clerkUserId)
@@ -1240,12 +1292,8 @@ app.get('/api/interviews/:interviewId/submissions', requireAuth, async (req, res
 // Get interview details with all candidates, stats, and time tracking
 app.get('/api/interviews/:interviewId/details', requireAuth, async (req, res) => {
   try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unauthorized' })
-    }
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
 
     const company = await getCompanyByClerkId(clerkUserId)
     if (!company) {
@@ -1308,13 +1356,9 @@ app.get('/api/interviews/:interviewId/details', requireAuth, async (req, res) =>
 
 app.get('/api/submissions/:submissionId/report', requireAuth, async (req, res) => {
   try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
     const { submissionId } = req.params
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unable to identify user' })
-    }
 
     // Get company by Clerk ID
     const company = await getCompanyByClerkId(clerkUserId)
@@ -1360,14 +1404,10 @@ app.get('/api/submissions/:submissionId/report', requireAuth, async (req, res) =
 
 app.patch('/api/submissions/:submissionId/status', requireAuth, async (req, res) => {
   try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
+    const authReq = req as AuthenticatedRequest
+    const clerkUserId = getClerkUserId(authReq)
     const { submissionId } = req.params
     const { status } = req.body
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unable to identify user' })
-    }
 
     // Validate status
     const validStatuses = ['pending', 'completed', 'reviewed']

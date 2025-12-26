@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { UserButton, useAuth } from '@clerk/clerk-react'
 import toast from 'react-hot-toast'
 import LoadingSpinner from '../components/LoadingSpinner.tsx'
+import UpgradePrompt from '../components/UpgradePrompt.tsx'
 import { handleApiError, parseApiError } from '../utils/apiErrorHandler.ts'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'
@@ -28,12 +29,17 @@ export default function Dashboard() {
   const [sortField, setSortField] = useState<'jobTitle' | 'createdAt' | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [deletingInterviewId, setDeletingInterviewId] = useState<string | null>(null)
+  const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null)
+  const [plan, setPlan] = useState<'free' | 'pro'>('free')
+  const [trialExpired, setTrialExpired] = useState(false)
+  const [daysUntilTrialExpires, setDaysUntilTrialExpires] = useState<number | null>(null)
   const { getToken } = useAuth()
   const navigate = useNavigate()
 
-  // Fetch interviews on mount
+  // Fetch interviews and credits on mount
   useEffect(() => {
     fetchInterviews()
+    fetchCredits()
   }, [])
 
   // Update current time and refetch interviews every minute for countdown
@@ -72,6 +78,27 @@ export default function Dashboard() {
       console.error('Failed to fetch interviews:', error)
     } finally {
       setLoadingInterviews(false)
+    }
+  }
+
+  const fetchCredits = async () => {
+    try {
+      const token = await getToken()
+      const response = await fetch(`${BACKEND_URL}/api/credits`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setCreditsRemaining(data.creditsRemaining)
+        setPlan(data.plan)
+        setTrialExpired(data.trialExpired)
+        setDaysUntilTrialExpires(data.daysUntilTrialExpires)
+      }
+    } catch (error) {
+      console.error('Failed to fetch credits:', error)
     }
   }
 
@@ -129,6 +156,7 @@ export default function Dashboard() {
 
       // Refresh interviews immediately to show it moved to past interviews
       await fetchInterviews()
+      await fetchCredits() // Refresh credits
 
       // Show success message
       if (result.status === 'evaluating') {
@@ -231,16 +259,53 @@ export default function Dashboard() {
           <div className="flex justify-between h-16 items-center">
             <Link to="/" className="cursor-pointer">
               <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                CodePair
+                codepair
               </h1>
             </Link>
-            <UserButton afterSignOutUrl="/sign-in" />
+            <UserButton afterSignOutUrl="/" />
           </div>
         </div>
       </nav>
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 pt-24">
         <div className="px-4 py-6 sm:px-0">
+          {/* Credits Display */}
+          {creditsRemaining !== null && (
+            <div className="mb-6 bg-white rounded-lg shadow p-4 border-l-4 border-blue-600">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Credits Remaining</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {creditsRemaining === -1 ? 'Unlimited' : creditsRemaining}
+                  </p>
+                  {plan === 'free' && daysUntilTrialExpires !== null && !trialExpired && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {daysUntilTrialExpires} {daysUntilTrialExpires === 1 ? 'day' : 'days'} left in trial
+                    </p>
+                  )}
+                </div>
+                {creditsRemaining === 0 && plan !== 'enterprise' && (
+                  <button
+                    onClick={() => navigate('/pricing')}
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    Upgrade to Pro
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Upgrade Prompt */}
+          {(creditsRemaining === 0 || trialExpired) && (
+            <UpgradePrompt 
+              message={trialExpired 
+                ? "Your free trial has expired. Upgrade to continue creating interviews."
+                : "You've used all your interview credits. Upgrade to continue."
+              }
+            />
+          )}
+
           <div className="mb-8">
             <button
               onClick={() => navigate('/create-interview')}

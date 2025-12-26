@@ -1,4 +1,5 @@
 import { getDb } from '../db.js'
+import type { Pool, PoolClient } from 'pg'
 import type {
   Company,
   Interview,
@@ -9,8 +10,10 @@ import type {
   CreateInterviewInput,
   CreateSubmissionInput,
   AddChatMessageInput,
-  CreateAIAnalysisInput
+  CreateAIAnalysisInput,
+  CreditCheckResult
 } from './types.js'
+import { PLAN_CONFIG } from '../config/plans.js'
 
 // Companies Functions
 
@@ -36,11 +39,15 @@ export async function getOrCreateCompany(
       throw new Error('companyName is required when creating a new company')
     }
 
+    // Calculate trial expiration date (14 days from now)
+    const trialEndsAt = new Date()
+    trialEndsAt.setDate(trialEndsAt.getDate() + PLAN_CONFIG.free.trialDays)
+
     const result = await db.query<Company>(
-      `INSERT INTO companies (clerk_user_id, company_name)
-       VALUES ($1, $2)
+      `INSERT INTO companies (clerk_user_id, company_name, plan, credits_remaining, trial_ends_at, subscription_status)
+       VALUES ($1, $2, 'free', $3, $4, 'free')
        RETURNING *`,
-      [clerkUserId, companyName]
+      [clerkUserId, companyName, PLAN_CONFIG.free.initialCredits, trialEndsAt.toISOString()]
     )
 
     if (result.rows.length === 0) {
@@ -72,8 +79,8 @@ export async function getCompanyByClerkId(clerkUserId: string): Promise<Company 
 
 // Interviews Functions
 
-export async function createInterview(input: CreateInterviewInput): Promise<Interview> {
-  const db = getDb()
+export async function createInterview(input: CreateInterviewInput, client?: PoolClient | Pool): Promise<Interview> {
+  const db = client || getDb()
 
   try {
     const result = await db.query<Interview>(
@@ -165,6 +172,117 @@ export async function deleteInterview(interviewId: string, companyId: string): P
     return true
   } catch (error) {
     console.error('Error in deleteInterview:', error)
+    throw error
+  }
+}
+
+// Credit Management Functions
+
+/**
+ * Check and decrement credits atomically to prevent race conditions.
+ * Uses atomic UPDATE with WHERE clause to ensure only one request can decrement.
+ */
+export async function checkAndDecrementCredits(companyId: string, client?: PoolClient | Pool): Promise<CreditCheckResult> {
+  const db = client || getDb()
+
+  try {
+    // First, get company for trial check
+    const companyResult = await db.query<Company>(
+      'SELECT * FROM companies WHERE id = $1',
+      [companyId]
+    )
+
+    if (companyResult.rows.length === 0) {
+      throw new Error('Company not found')
+    }
+
+    const company = companyResult.rows[0]
+
+    // Check if unlimited plan (enterprise)
+    if (company.plan === 'enterprise') {
+      // For unlimited, we still decrement for tracking but it doesn't matter
+      // Return -1 to indicate unlimited
+      const updateResult = await db.query<Company>(
+        `UPDATE companies 
+         SET credits_remaining = credits_remaining - 1 
+         WHERE id = $1
+         RETURNING *`,
+        [companyId]
+      )
+      
+      if (updateResult.rows.length === 0) {
+        throw new Error('Company not found')
+      }
+      
+      return { allowed: true, creditsRemaining: -1 } // -1 means unlimited
+    }
+
+    // Check if trial expired (for free plan)
+    if (company.plan === 'free' && company.trial_ends_at) {
+      const trialEnd = new Date(company.trial_ends_at)
+      if (trialEnd < new Date()) {
+        return {
+          allowed: false,
+          creditsRemaining: company.credits_remaining,
+          reason: 'Your free trial has expired. Upgrade to continue.'
+        }
+      }
+    }
+
+    // Atomic decrement: only update if credits > 0, return updated row
+    const updateResult = await db.query<Company>(
+      `UPDATE companies 
+       SET credits_remaining = credits_remaining - 1 
+       WHERE id = $1 AND credits_remaining > 0
+       RETURNING *`,
+      [companyId]
+    )
+
+    if (updateResult.rows.length === 0) {
+      // Either company not found or credits were already 0
+      return {
+        allowed: false,
+        creditsRemaining: company.credits_remaining,
+        reason: 'You\'ve used all your interview credits. Upgrade to get 30 credits per month.'
+      }
+    }
+
+    return { 
+      allowed: true, 
+      creditsRemaining: updateResult.rows[0].credits_remaining 
+    }
+  } catch (error) {
+    console.error('Error in checkAndDecrementCredits:', error)
+    throw error
+  }
+}
+
+export async function getCompanyWithCredits(companyId: string): Promise<Company | null> {
+  const db = getDb()
+
+  try {
+    const result = await db.query<Company>(
+      'SELECT * FROM companies WHERE id = $1',
+      [companyId]
+    )
+
+    return result.rows.length > 0 ? result.rows[0] : null
+  } catch (error) {
+    console.error('Error in getCompanyWithCredits:', error)
+    throw error
+  }
+}
+
+export async function resetMonthlyCredits(companyId: string): Promise<void> {
+  const db = getDb()
+
+  try {
+    await db.query(
+      'UPDATE companies SET credits_remaining = $1 WHERE id = $2 AND plan = $3',
+      [PLAN_CONFIG.pro.monthlyCredits, companyId, 'pro']
+    )
+  } catch (error) {
+    console.error('Error in resetMonthlyCredits:', error)
     throw error
   }
 }

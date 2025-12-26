@@ -708,7 +708,7 @@ export default function CandidateInterview() {
             className="bg-indigo-500 text-white p-3 font-semibold cursor-move select-none"
             onMouseDown={handleDragStart}
           >
-            CodePair Assistant
+            codepair Assistant
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {messages.length === 0 && (
