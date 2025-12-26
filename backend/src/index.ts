@@ -13,6 +13,7 @@ import {
   getInterviewById,
   getInterviewByLink,
   getInterviewsByCompany,
+  deleteInterview,
   createSubmission,
   getSubmissionById,
   getSubmissionByEmailAndInterview,
@@ -295,7 +296,8 @@ app.post('/api/generate-session', requireAuth, async (req, res) => {
       job_description: req.body.jobDescription || null,
       instructions: req.body.instructions || null,
       unique_link: uniqueLink,
-      time_limit_minutes: req.body.timeLimitMinutes || 60
+      time_limit_minutes: req.body.timeLimitMinutes || 60,
+      starter_code: req.body.starterCode || null
     })
 
     console.log(`Created new interview: ${interview.id}`)
@@ -374,7 +376,8 @@ app.get('/api/interviews/link/:uniqueLink', async (req, res) => {
       job_title: interview.job_title,
       instructions: interview.instructions,
       unique_link: interview.unique_link,
-      time_limit_minutes: interview.time_limit_minutes
+      time_limit_minutes: interview.time_limit_minutes,
+      starter_code: interview.starter_code || null
     })
   } catch (error) {
     console.error('Error fetching interview by link:', error)
@@ -700,6 +703,7 @@ ${interview ? `Job Details:
 - Position: ${interview.job_title}
 ${interview.job_description ? `- Description: ${interview.job_description}` : ''}
 ${interview.instructions ? `- Instructions: ${interview.instructions}` : ''}
+${interview.starter_code ? `- Starter Code Provided:\n\`\`\`${submission.language || 'text'}\n${interview.starter_code}\n\`\`\`` : ''}
 
 ` : ''}Be professional, encouraging, and ask thoughtful follow-up questions. 
 Provide hints when needed but don't give away solutions.
@@ -918,6 +922,7 @@ app.post('/api/probe-candidate', async (req, res) => {
 
 Job Description: ${interview.job_description || 'Not provided'}
 Problem/Instructions: ${interview.instructions || 'Not provided'}
+Starter Code Provided: ${interview.starter_code || 'None'}
 Candidate's Current Code: ${code || 'No code written yet'}
 Language: ${language || 'Not specified'}
 
@@ -1141,6 +1146,37 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
     res.json(sessionsArray)
   } catch (error) {
     console.error('Error in get sessions:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+app.delete('/api/interviews/:interviewId', requireAuth, async (req, res) => {
+  try {
+    const auth = (req as any).auth
+    const clerkUserId = auth.userId || auth.sub || auth.id
+
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unable to identify user' })
+    }
+
+    // Get company by Clerk ID
+    const company = await getCompanyByClerkId(clerkUserId)
+    if (!company) {
+      return res.status(404).json({ error: 'Company not found' })
+    }
+
+    const { interviewId } = req.params
+
+    // Delete interview (function verifies ownership)
+    const deleted = await deleteInterview(interviewId, company.id)
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Interview not found or unauthorized' })
+    }
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Error in delete interview:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })

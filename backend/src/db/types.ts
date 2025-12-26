@@ -15,6 +15,7 @@ export interface Interview {
   instructions: string | null
   unique_link: string
   time_limit_minutes: number | null
+  starter_code: string | null
   created_at: string
 }
 
@@ -64,6 +65,7 @@ export interface CreateInterviewInput {
   instructions?: string
   unique_link: string
   time_limit_minutes?: number
+  starter_code?: string
 }
 
 export interface CreateSubmissionInput {

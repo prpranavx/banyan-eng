@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { UserButton, useAuth } from '@clerk/clerk-react'
 import toast from 'react-hot-toast'
 import LoadingSpinner from '../components/LoadingSpinner.tsx'
@@ -25,6 +25,9 @@ export default function Dashboard() {
   const [candidateCounts, setCandidateCounts] = useState<Map<string, number>>(new Map())
   const [loadingInterviews, setLoadingInterviews] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [sortField, setSortField] = useState<'jobTitle' | 'createdAt' | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [deletingInterviewId, setDeletingInterviewId] = useState<string | null>(null)
   const { getToken } = useAuth()
   const navigate = useNavigate()
 
@@ -142,17 +145,95 @@ export default function Dashboard() {
     }
   }
 
-  const activeSessions = sessions.filter(s => s.status === 'active')
-  const pastSessions = sessions.filter(s => s.status === 'completed')
+  const deleteInterview = async (interviewId: string) => {
+    if (deletingInterviewId) return
+
+    const confirmed = window.confirm('Are you sure you want to delete this interview? This action cannot be undone.')
+    if (!confirmed) return
+
+    setDeletingInterviewId(interviewId)
+    try {
+      const token = await getToken()
+      const response = await fetch(`${BACKEND_URL}/api/interviews/${interviewId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (!response.ok) {
+        const errorMessage = await parseApiError(response)
+        throw new Error(errorMessage)
+      }
+
+      // Refresh interviews list
+      await fetchInterviews()
+      toast.success('Interview deleted successfully')
+    } catch (error) {
+      const errorMessage = handleApiError(error)
+      toast.error(errorMessage)
+      console.error('Failed to delete interview:', error)
+    } finally {
+      setDeletingInterviewId(null)
+    }
+  }
+
+  const sortSessions = (sessions: Session[], field: 'jobTitle' | 'createdAt', direction: 'asc' | 'desc'): Session[] => {
+    return [...sessions].sort((a, b) => {
+      let aVal: string | number
+      let bVal: string | number
+      
+      if (field === 'jobTitle') {
+        aVal = a.jobTitle.toLowerCase()
+        bVal = b.jobTitle.toLowerCase()
+      } else {
+        aVal = new Date(a.createdAt).getTime()
+        bVal = new Date(b.createdAt).getTime()
+      }
+      
+      if (direction === 'asc') {
+        return aVal > bVal ? 1 : -1
+      } else {
+        return aVal < bVal ? 1 : -1
+      }
+    })
+  }
+
+  const handleSort = (field: 'jobTitle' | 'createdAt') => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      // Set new field with default desc direction
+      setSortField(field)
+      setSortDirection('desc')
+    }
+  }
+
+  const getSortIndicator = (field: 'jobTitle' | 'createdAt') => {
+    if (sortField !== field) {
+      return <span className="text-gray-400">↕</span>
+    }
+    return sortDirection === 'asc' ? <span className="text-gray-600">↑</span> : <span className="text-gray-600">↓</span>
+  }
+
+  const activeSessions = sortField 
+    ? sortSessions(sessions.filter(s => s.status === 'active'), sortField, sortDirection)
+    : sessions.filter(s => s.status === 'active')
+  const pastSessions = sortField
+    ? sortSessions(sessions.filter(s => s.status === 'completed'), sortField, sortDirection)
+    : sessions.filter(s => s.status === 'completed')
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       <nav className="fixed top-0 w-full bg-white/80 backdrop-blur-md border-b border-gray-200 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              AI Interview
-            </h1>
+            <Link to="/" className="cursor-pointer">
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                CodePair
+              </h1>
+            </Link>
             <UserButton afterSignOutUrl="/sign-in" />
           </div>
         </div>
@@ -196,11 +277,23 @@ export default function Dashboard() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Job Title
+                      <th 
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('jobTitle')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Job Title
+                          {getSortIndicator('jobTitle')}
+                        </div>
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Created At
+                      <th 
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('createdAt')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Created At
+                          {getSortIndicator('createdAt')}
+                        </div>
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Candidates
@@ -254,7 +347,21 @@ export default function Dashboard() {
                             View
                           </a>
                           <button
-                            onClick={() => endInterview(session.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              deleteInterview(session.id)
+                            }}
+                            disabled={deletingInterviewId === session.id}
+                            className="text-red-600 hover:text-red-900 disabled:text-gray-400 flex items-center gap-2 mr-4"
+                          >
+                            {deletingInterviewId === session.id && <LoadingSpinner size="sm" />}
+                            {deletingInterviewId === session.id ? 'Deleting...' : 'Delete'}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              endInterview(session.id)
+                            }}
                             disabled={isEndingInterview === session.id}
                             className="text-red-600 hover:text-red-900 disabled:text-gray-400 flex items-center gap-2"
                           >
@@ -283,8 +390,14 @@ export default function Dashboard() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Job Title
+                      <th 
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('jobTitle')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Job Title
+                          {getSortIndicator('jobTitle')}
+                        </div>
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Name
@@ -292,8 +405,14 @@ export default function Dashboard() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Time Taken
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Created At
+                      <th 
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('createdAt')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Created At
+                          {getSortIndicator('createdAt')}
+                        </div>
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
@@ -320,13 +439,26 @@ export default function Dashboard() {
                           {new Date(session.createdAt).toLocaleString()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            session.status === 'completed' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {session.status === 'completed' ? 'Completed' : 'Active'}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              session.status === 'completed' 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {session.status === 'completed' ? 'Completed' : 'Active'}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                deleteInterview(session.id)
+                              }}
+                              disabled={deletingInterviewId === session.id}
+                              className="text-red-600 hover:text-red-900 disabled:text-gray-400 flex items-center gap-2 text-xs"
+                            >
+                              {deletingInterviewId === session.id && <LoadingSpinner size="sm" />}
+                              {deletingInterviewId === session.id ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

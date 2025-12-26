@@ -1,6 +1,6 @@
-# AI-Powered Live Coding Interview Tool
+# CodePair - AI-Powered Live Coding Interview Platform
 
-A full-stack MVP for conducting AI-assisted technical interviews with real-time code monitoring.
+A full-stack MVP for conducting AI-assisted technical interviews with real-time code monitoring. CodePair enables interviewers to create coding interviews and candidates to solve problems with AI assistance.
 
 ## Architecture
 
@@ -103,7 +103,7 @@ Backend runs on http://localhost:3000
 
 ### Candidate Interview Page
 - Clean chat interface
-- Real-time AI interviewer responses
+- Real-time AI assistant responses
 - No authentication required for candidates
 - Session-based tracking
 

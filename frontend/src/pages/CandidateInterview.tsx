@@ -28,6 +28,7 @@ interface Interview {
   instructions: string | null
   unique_link: string
   time_limit_minutes: number | null
+  starter_code: string | null
 }
 
 export default function CandidateInterview() {
@@ -69,6 +70,7 @@ export default function CandidateInterview() {
   const assistantRef = useRef<HTMLDivElement>(null)
   const resizeHandleRef = useRef<HTMLDivElement>(null)
   const startTimeRef = useRef<number | null>(null)
+  const initializedRef = useRef(false)
 
   // Fetch interview data
   useEffect(() => {
@@ -194,21 +196,42 @@ export default function CandidateInterview() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Load existing submission code when resuming
+  // Reset initialization ref when submissionId changes
   useEffect(() => {
-    if (!submissionId || !showEditor) return
+    initializedRef.current = false
+  }, [submissionId])
+
+  // Load existing submission code when resuming, or initialize with starter code
+  useEffect(() => {
+    if (!submissionId || !showEditor || !interview || initializedRef.current) return
 
     const loadSubmission = async () => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/submissions/${submissionId}`)
         if (response.ok) {
           const submission = await response.json()
+          
+          // Priority order:
+          // 1. Existing submission code (highest priority)
+          // 2. Starter code from interview (if no existing code)
+          // 3. Empty string (fallback)
+          
           if (submission.code) {
+            // Existing code takes precedence
             setCode(submission.code)
+            if (submission.language) {
+              setLanguage(submission.language)
+            }
+          } else if (interview.starter_code) {
+            // Only use starter code if:
+            // - Interview has starter code
+            // - No existing code in submission
+            // Note: We don't check current code state here to avoid dependency issues
+            // The initializedRef ensures this only runs once
+            setCode(interview.starter_code)
           }
-          if (submission.language) {
-            setLanguage(submission.language)
-          }
+          
+          initializedRef.current = true
         }
       } catch (error) {
         console.error('Failed to load submission:', error)
@@ -216,7 +239,7 @@ export default function CandidateInterview() {
     }
 
     loadSubmission()
-  }, [submissionId, showEditor])
+  }, [submissionId, showEditor, interview])
 
   // Fetch session details (only if we have submissionId)
   useEffect(() => {
@@ -685,7 +708,7 @@ export default function CandidateInterview() {
             className="bg-indigo-500 text-white p-3 font-semibold cursor-move select-none"
             onMouseDown={handleDragStart}
           >
-            AI Interview Assistant
+            CodePair Assistant
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {messages.length === 0 && (

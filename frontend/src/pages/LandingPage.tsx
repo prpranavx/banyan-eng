@@ -12,7 +12,7 @@ export default function LandingPage() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                AI Interview
+                CodePair
               </h1>
             </div>
             <div className="flex items-center gap-4">
@@ -213,7 +213,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="bg-gray-900 text-gray-400 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
-          <p>&copy; 2025 AI Interview Platform. All rights reserved.</p>
+          <p>&copy; 2025 CodePair. All rights reserved.</p>
         </div>
       </footer>
     </div>

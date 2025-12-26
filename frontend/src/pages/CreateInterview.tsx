@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import Editor from '@monaco-editor/react'
 import toast from 'react-hot-toast'
 import LoadingSpinner from '../components/LoadingSpinner.tsx'
 import { handleApiError, parseApiError } from '../utils/apiErrorHandler.ts'
@@ -162,6 +163,8 @@ export default function CreateInterview() {
   const [jobTitle, setJobTitle] = useState('')
   const [jobDescription, setJobDescription] = useState('')
   const [instructions, setInstructions] = useState('')
+  const [starterCode, setStarterCode] = useState('')
+  const [starterCodeLanguage, setStarterCodeLanguage] = useState('python')
   const [timeLimitMinutes, setTimeLimitMinutes] = useState(60)
   const [selectedTemplate, setSelectedTemplate] = useState('custom')
   const [formErrors, setFormErrors] = useState<{ jobTitle?: string }>({})
@@ -203,6 +206,7 @@ export default function CreateInterview() {
           jobTitle: jobTitle.trim(),
           jobDescription: jobDescription.trim() || undefined,
           instructions: instructions.trim() || undefined,
+          starterCode: starterCode.trim() || undefined,
           timeLimitMinutes: timeLimitMinutes || 60
         })
       })
@@ -386,6 +390,57 @@ export default function CreateInterview() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="starterCode" className="block text-sm font-medium text-gray-700 mb-1">
+                    Starter Code <span className="text-gray-500 text-xs">(optional)</span>
+                  </label>
+                  <p className="mb-2 text-xs text-gray-500">
+                    Initial code template that candidates will see when they start. They can use any language, but this template is provided as a starting point.
+                  </p>
+                  <div className="mb-2">
+                    <label htmlFor="starterCodeLanguage" className="block text-xs font-medium text-gray-600 mb-1">
+                      Language (for syntax highlighting)
+                    </label>
+                    <select
+                      id="starterCodeLanguage"
+                      value={starterCodeLanguage}
+                      onChange={(e) => setStarterCodeLanguage(e.target.value)}
+                      className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={isCreatingSession}
+                    >
+                      <option value="python">Python</option>
+                      <option value="javascript">JavaScript</option>
+                      <option value="java">Java</option>
+                      <option value="cpp">C++</option>
+                      <option value="c">C</option>
+                    </select>
+                  </div>
+                  <div className="border border-gray-300 rounded-md overflow-hidden" style={{ height: '400px' }}>
+                    <Editor
+                      height="100%"
+                      language={starterCodeLanguage}
+                      value={starterCode}
+                      onChange={(value) => setStarterCode(value || '')}
+                      theme="vs-light"
+                      options={{
+                        fontSize: 14,
+                        minimap: { enabled: false },
+                        wordWrap: 'on' as const,
+                        automaticLayout: true,
+                        scrollBeyondLastLine: false,
+                        padding: { top: 16, bottom: 16 },
+                        tabSize: 2,
+                        insertSpaces: true,
+                        renderWhitespace: 'selection' as const,
+                        lineNumbers: 'on' as const,
+                        folding: true,
+                        bracketPairColorization: { enabled: true },
+                        readOnly: isCreatingSession
+                      }}
+                    />
                   </div>
                 </div>
 

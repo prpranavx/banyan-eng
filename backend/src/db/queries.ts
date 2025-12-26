@@ -77,8 +77,8 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
 
   try {
     const result = await db.query<Interview>(
-      `INSERT INTO interviews (company_id, job_title, job_description, instructions, unique_link, time_limit_minutes)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO interviews (company_id, job_title, job_description, instructions, unique_link, time_limit_minutes, starter_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         input.company_id,
@@ -86,7 +86,8 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
         input.job_description || null,
         input.instructions || null,
         input.unique_link,
-        input.time_limit_minutes || 60
+        input.time_limit_minutes || 60,
+        input.starter_code || null
       ]
     )
 
@@ -145,6 +146,25 @@ export async function getInterviewsByCompany(companyId: string): Promise<Intervi
     return result.rows
   } catch (error) {
     console.error('Error in getInterviewsByCompany:', error)
+    throw error
+  }
+}
+
+export async function deleteInterview(interviewId: string, companyId: string): Promise<boolean> {
+  const db = getDb()
+
+  try {
+    // Verify interview belongs to company (security check)
+    const interview = await getInterviewById(interviewId)
+    if (!interview || interview.company_id !== companyId) {
+      return false
+    }
+
+    // Delete interview (cascade will handle submissions, messages, etc.)
+    await db.query('DELETE FROM interviews WHERE id = $1', [interviewId])
+    return true
+  } catch (error) {
+    console.error('Error in deleteInterview:', error)
     throw error
   }
 }

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Starting AI Interview System Test..."
+echo "🚀 Starting CodePair System Test..."
 
 # Colors for output
 RED='\033[0;31m'
