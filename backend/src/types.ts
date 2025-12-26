@@ -11,9 +11,6 @@ export interface Session {
   status: 'active' | 'completed'
 }
 
-export interface CreateSessionRequest {
-}
-
 export interface SendMessageRequest {
   sessionId: string
   message: string

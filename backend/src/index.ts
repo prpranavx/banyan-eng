@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import OpenAI from 'openai'
 import { clerkClient } from '@clerk/clerk-sdk-node'
 import type { Session, SendMessageRequest, EvaluateRequest, EvaluationResult } from './types.js'
-import type { Interview } from './db/types.js'
+import type { Interview, Submission } from './db/types.js'
 import { getDb } from './db.js'
 import {
   getOrCreateCompany,
@@ -171,6 +171,67 @@ async function getOrCreateSubmissionForInterview(
     interview_id: interviewId,
     candidate_name: candidateName,
     candidate_email: candidateEmail
+  })
+}
+
+// Helper function to build evaluation prompt from submission and transcript
+function buildEvaluationPrompt(submission: Submission, transcript: string): string {
+  if (transcript.trim().length < 50 && submission.code) {
+    return `Analyze this coding interview submission and provide a JSON evaluation with:
+- score (0-100)
+- summary (brief overview)
+- strengths (array of strings)
+- improvements (array of strings)
+
+Candidate Code:
+${submission.code}
+
+Language: ${submission.language || 'Not specified'}
+
+Transcript:
+${transcript || 'No conversation yet'}
+
+Respond with valid JSON only.`
+  } else {
+    return `Analyze this coding interview transcript and provide a JSON evaluation with:
+- score (0-100)
+- summary (brief overview)
+- strengths (array of strings)
+- improvements (array of strings)
+
+Transcript:
+${transcript || 'No conversation yet'}
+
+${submission.code ? `Candidate Code:\n${submission.code}\n\nLanguage: ${submission.language || 'Not specified'}` : ''}
+
+Respond with valid JSON only.`
+  }
+}
+
+// Helper function to check if candidate meaningfully participated
+function shouldEvaluate(chatMessages: Array<{sender: string, message: string}>, submission: Submission): boolean {
+  // Check if candidate has sent at least one message
+  const hasCandidateMessages = chatMessages.some(m => m.sender === 'user')
+  
+  // Check if there's meaningful code (more than just whitespace/single character)
+  const hasMeaningfulCode = submission.code !== null && submission.code.trim().length > 10
+  
+  // Only evaluate if candidate participated OR provided meaningful code
+  return hasCandidateMessages || hasMeaningfulCode
+}
+
+// Helper function to create a zero-score evaluation for non-participating candidates
+async function createZeroScoreEvaluation(submission: Submission, reason: string): Promise<void> {
+  await createAIAnalysis({
+    submission_id: submission.id,
+    score: 0,
+    summary: `No meaningful participation: ${reason}. Candidate submitted without engaging in the interview or providing substantial code.`,
+    strengths: [],
+    improvements: [
+      'Candidate did not respond to interview questions',
+      'No meaningful code was submitted',
+      'No demonstration of problem-solving approach'
+    ]
   })
 }
 
@@ -389,54 +450,43 @@ app.post('/api/submissions/:submissionId/submit', async (req, res) => {
     // Update submission status to completed
     await updateSubmissionStatus(submissionId, 'completed')
 
+    // Check if analysis already exists
+    const existingAnalysis = await getAIAnalysisBySubmission(submission.id)
+    if (existingAnalysis) {
+      return res.json({ 
+        success: true,
+        message: 'Interview submitted successfully.'
+      })
+    }
+
+    // Get chat messages synchronously to check participation
+    const chatMessages = await getChatMessages(submission.id)
+    
+    // Check if candidate meaningfully participated
+    if (!shouldEvaluate(chatMessages, submission)) {
+      // Create zero-score evaluation synchronously
+      const reason = !chatMessages.some(m => m.sender === 'user') 
+        ? 'No responses to interview questions'
+        : 'No meaningful code submitted'
+      
+      await createZeroScoreEvaluation(submission, reason)
+      console.log('Created zero-score evaluation for submission:', submission.id)
+      
+      return res.json({ 
+        success: true,
+        message: 'Interview submitted successfully.'
+      })
+    }
+
     // Trigger evaluation asynchronously (same logic as /api/evaluate)
     ;(async () => {
       try {
-        // Check if analysis already exists
-        const existingAnalysis = await getAIAnalysisBySubmission(submission.id)
-        if (existingAnalysis) {
-          console.log('Analysis already exists for submission:', submission.id)
-          return
-        }
-
-        // Get all chat messages for this submission
-        const chatMessages = await getChatMessages(submission.id)
         const transcript = chatMessages
           .map(m => `${m.sender.toUpperCase()}: ${m.message}`)
           .join('\n\n')
 
-        // Include code in evaluation if transcript is short or empty
-        let evaluationPrompt = ''
-        if (transcript.trim().length < 50 && submission.code) {
-          evaluationPrompt = `Analyze this coding interview submission and provide a JSON evaluation with:
-- score (0-100)
-- summary (brief overview)
-- strengths (array of strings)
-- improvements (array of strings)
-
-Candidate Code:
-${submission.code}
-
-Language: ${submission.language || 'Not specified'}
-
-Transcript:
-${transcript || 'No conversation yet'}
-
-Respond with valid JSON only.`
-        } else {
-          evaluationPrompt = `Analyze this coding interview transcript and provide a JSON evaluation with:
-- score (0-100)
-- summary (brief overview)
-- strengths (array of strings)
-- improvements (array of strings)
-
-Transcript:
-${transcript || 'No conversation yet'}
-
-${submission.code ? `Candidate Code:\n${submission.code}\n\nLanguage: ${submission.language || 'Not specified'}` : ''}
-
-Respond with valid JSON only.`
-        }
+        // Build evaluation prompt using shared helper function
+        const evaluationPrompt = buildEvaluationPrompt(submission, transcript)
 
         console.log('Auto-evaluating submission:', submission.id)
         const completion = await openai.chat.completions.create({
@@ -619,6 +669,11 @@ app.post('/api/send-message', async (req, res) => {
       return res.status(404).json({ error: 'Submission not found' })
     }
 
+    // Get interview if not already fetched
+    if (!interview) {
+      interview = await getInterviewById(submission.interview_id)
+    }
+
     // Save user message
     await addChatMessage({
       submission_id: submission.id,
@@ -639,8 +694,14 @@ app.post('/api/send-message', async (req, res) => {
       content: m.message
     }))
 
-    const systemPrompt = `You are an AI technical interviewer conducting a live coding interview. 
-Be professional, encouraging, and ask thoughtful follow-up questions. 
+    const systemPrompt = `You are an AI technical interviewer conducting a live coding interview.
+
+${interview ? `Job Details:
+- Position: ${interview.job_title}
+${interview.job_description ? `- Description: ${interview.job_description}` : ''}
+${interview.instructions ? `- Instructions: ${interview.instructions}` : ''}
+
+` : ''}Be professional, encouraging, and ask thoughtful follow-up questions. 
 Provide hints when needed but don't give away solutions.
 ${codeSnapshot ? `Current code:\n${codeSnapshot}` : ''}`
 
@@ -732,6 +793,33 @@ app.post('/api/evaluate', requireAuth, async (req, res) => {
       await updateSubmissionStatus(submission.id, 'completed')
     }
 
+    // Get chat messages synchronously to check participation
+    const chatMessages = await getChatMessages(submission.id)
+    
+    // Check if candidate meaningfully participated
+    if (!shouldEvaluate(chatMessages, submission)) {
+      // Create zero-score evaluation synchronously
+      const reason = !chatMessages.some(m => m.sender === 'user') 
+        ? 'No responses to interview questions'
+        : 'No meaningful code submitted'
+      
+      await createZeroScoreEvaluation(submission, reason)
+      console.log('Created zero-score evaluation for submission:', submission.id)
+      
+      // Get the analysis we just created
+      const zeroScoreAnalysis = await getAIAnalysisBySubmission(submission.id)
+      if (zeroScoreAnalysis) {
+        const result: EvaluationResult = {
+          sessionId,
+          score: zeroScoreAnalysis.score,
+          summary: zeroScoreAnalysis.summary,
+          strengths: zeroScoreAnalysis.strengths,
+          improvements: zeroScoreAnalysis.improvements
+        }
+        return res.json(result)
+      }
+    }
+
     // Return immediately - evaluation will happen in background
     res.json({ 
       sessionId,
@@ -742,44 +830,12 @@ app.post('/api/evaluate', requireAuth, async (req, res) => {
     // Start evaluation asynchronously (don't await)
     ;(async () => {
       try {
-        // Get all chat messages for this submission
-        const chatMessages = await getChatMessages(submission.id)
         const transcript = chatMessages
           .map(m => `${m.sender.toUpperCase()}: ${m.message}`)
           .join('\n\n')
 
-        // Include code in evaluation if transcript is short or empty
-        let evaluationPrompt = ''
-        if (transcript.trim().length < 50 && submission.code) {
-          evaluationPrompt = `Analyze this coding interview submission and provide a JSON evaluation with:
-- score (0-100)
-- summary (brief overview)
-- strengths (array of strings)
-- improvements (array of strings)
-
-Candidate Code:
-${submission.code}
-
-Language: ${submission.language || 'Not specified'}
-
-Transcript:
-${transcript || 'No conversation yet'}
-
-Respond with valid JSON only.`
-        } else {
-          evaluationPrompt = `Analyze this coding interview transcript and provide a JSON evaluation with:
-- score (0-100)
-- summary (brief overview)
-- strengths (array of strings)
-- improvements (array of strings)
-
-Transcript:
-${transcript || 'No conversation yet'}
-
-${submission.code ? `Candidate Code:\n${submission.code}\n\nLanguage: ${submission.language || 'Not specified'}` : ''}
-
-Respond with valid JSON only.`
-        }
+        // Build evaluation prompt using shared helper function
+        const evaluationPrompt = buildEvaluationPrompt(submission, transcript)
 
         console.log('Calling OpenAI for evaluation (async)...')
         const completion = await openai.chat.completions.create({
@@ -1052,9 +1108,27 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
           timeRemaining = Math.max(0, totalSeconds - elapsedSeconds)
         }
 
+        // Get first submission for candidate name and time taken
+        const firstSubmission = submissions.length > 0 ? submissions[0] : null
+        let candidateName: string | null = null
+        let timeTaken: number | null = null
+
+        if (firstSubmission) {
+          candidateName = firstSubmission.candidate_name || null
+          
+          // Calculate time taken if submission has both started_at and submitted_at
+          if (firstSubmission.started_at && firstSubmission.submitted_at) {
+            const startTime = new Date(firstSubmission.started_at).getTime()
+            const submitTime = new Date(firstSubmission.submitted_at).getTime()
+            timeTaken = Math.round((submitTime - startTime) / 1000 / 60) // minutes
+          }
+        }
+
         return {
           id: interview.id,
           jobTitle: interview.job_title,
+          candidateName,
+          timeTaken,
           createdAt: interview.created_at,
           status,
           uniqueLink: interview.unique_link,
@@ -1260,60 +1334,7 @@ app.patch('/api/submissions/:submissionId/status', requireAuth, async (req, res)
     }
 
     // Validate status
-    const validStatuses = ['pending', 'completed', 'reviewed', 'accepted', 'rejected', 'scheduled']
-    if (!status || !validStatuses.includes(status)) {
-      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` })
-    }
-
-    // Get company by Clerk ID
-    const company = await getCompanyByClerkId(clerkUserId)
-    if (!company) {
-      return res.status(403).json({ error: 'Company not found' })
-    }
-
-    // Get submission
-    const submission = await getSubmissionById(submissionId)
-    if (!submission) {
-      return res.status(404).json({ error: 'Submission not found' })
-    }
-
-    // Verify interview belongs to user's company
-    const interview = await getInterviewById(submission.interview_id)
-    if (!interview) {
-      return res.status(404).json({ error: 'Interview not found' })
-    }
-
-    if (interview.company_id !== company.id) {
-      return res.status(403).json({ error: 'Unauthorized - Submission does not belong to your company' })
-    }
-
-    // Update status
-    const updatedSubmission = await updateSubmissionStatus(submissionId, status)
-
-    res.json(updatedSubmission)
-  } catch (error) {
-    console.error('Error in update submission status:', error)
-    res.status(500).json({ error: 'Internal server error' })
-  }
-})
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' })
-})
-
-app.patch('/api/submissions/:submissionId/status', requireAuth, async (req, res) => {
-  try {
-    const auth = (req as any).auth
-    const clerkUserId = auth.userId || auth.sub || auth.id
-    const { submissionId } = req.params
-    const { status } = req.body
-
-    if (!clerkUserId) {
-      return res.status(401).json({ error: 'Unable to identify user' })
-    }
-
-    // Validate status
-    const validStatuses = ['pending', 'completed', 'reviewed', 'accepted', 'rejected', 'scheduled']
+    const validStatuses = ['pending', 'completed', 'reviewed']
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` })
     }

@@ -10,6 +10,8 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'
 interface Session {
   id: string
   jobTitle: string
+  candidateName?: string | null
+  timeTaken?: number | null
   createdAt: string
   status: 'active' | 'completed'
   uniqueLink: string
@@ -198,9 +200,6 @@ export default function Dashboard() {
                         Job Title
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Time Limit
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Created At
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -219,23 +218,6 @@ export default function Dashboard() {
                       <tr key={session.id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {session.jobTitle}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {session.timeRemainingSeconds !== null && session.timeRemainingSeconds !== undefined ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-50 text-orange-700 rounded-md text-xs font-medium">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              {Math.floor(session.timeRemainingSeconds / 60)}:{(session.timeRemainingSeconds % 60).toString().padStart(2, '0')} remaining
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-medium">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              {session.timeLimitMinutes || 60} min
-                            </span>
-                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(session.createdAt).toLocaleString()}
@@ -266,7 +248,7 @@ export default function Dashboard() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <a
-                            href={`/interview/${session.id}/candidates`}
+                            href={`/interview/${session.id}/details`}
                             className="text-blue-600 hover:text-blue-900 mr-4"
                           >
                             View
@@ -305,13 +287,13 @@ export default function Dashboard() {
                         Job Title
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Time Limit
+                        Name
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Time Taken
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Created At
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Candidates
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
@@ -329,31 +311,21 @@ export default function Dashboard() {
                           {session.jobTitle}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {session.timeLimitMinutes ? `${session.timeLimitMinutes} min` : 'No limit'}
+                          {session.candidateName || '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {session.timeTaken ? `${session.timeTaken} min` : '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(session.createdAt).toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {candidateCounts.get(session.id) ?? '-'}
-                        </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-md text-xs font-medium">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {session.timeLimitMinutes || 60} min
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {new Date(session.createdAt).toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {candidateCounts.get(session.id) ?? '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                            Completed
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            session.status === 'completed' 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {session.status === 'completed' ? 'Completed' : 'Active'}
                           </span>
                         </td>
                       </tr>

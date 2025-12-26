@@ -396,7 +396,6 @@ export default function CreateInterview() {
                   <input
                     id="timeLimitMinutes"
                     type="number"
-                    min="15"
                     max="180"
                     value={timeLimitMinutes}
                     onChange={(e) => setTimeLimitMinutes(parseInt(e.target.value) || 60)}

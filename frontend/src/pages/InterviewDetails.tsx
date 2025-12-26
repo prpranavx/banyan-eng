@@ -43,7 +43,6 @@ export default function InterviewDetails() {
   const navigate = useNavigate()
   const [data, setData] = useState<InterviewDetails | null>(null)
   const [loading, setLoading] = useState(true)
-  const [currentTime, setCurrentTime] = useState(Date.now())
   const { getToken } = useAuth()
 
   useEffect(() => {
@@ -52,23 +51,6 @@ export default function InterviewDetails() {
     }
   }, [interviewId])
 
-  // Update current time every minute for countdown
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(Date.now())
-    }, 60000) // Update every minute
-    return () => clearInterval(interval)
-  }, [])
-
-  // Helper function to calculate remaining time
-  const calculateTimeRemaining = (startedAt: string | null, timeLimitMinutes: number | null): number | null => {
-    if (!startedAt || !timeLimitMinutes) return null
-    const startTime = new Date(startedAt).getTime()
-    const elapsedSeconds = Math.floor((currentTime - startTime) / 1000)
-    const totalSeconds = timeLimitMinutes * 60
-    const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds)
-    return remainingSeconds
-  }
 
   const fetchDetails = async () => {
     try {
@@ -198,7 +180,6 @@ export default function InterviewDetails() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time Taken</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
@@ -220,19 +201,6 @@ export default function InterviewDetails() {
                       }`}>
                         {candidate.status}
                       </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {candidate.status === 'completed' ? (
-                        candidate.timeTaken !== null ? `${candidate.timeTaken} min` : '-'
-                      ) : (
-                        (() => {
-                          const remaining = calculateTimeRemaining(candidate.started_at, data.interview.time_limit_minutes)
-                          if (remaining === null) return '-'
-                          const minutes = Math.floor(remaining / 60)
-                          const seconds = remaining % 60
-                          return `${minutes}:${seconds.toString().padStart(2, '0')} remaining`
-                        })()
-                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {candidate.analysis ? (

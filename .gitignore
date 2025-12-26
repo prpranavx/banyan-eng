@@ -27,3 +27,7 @@ worker/node_modules/
 worker/dist/
 worker/.env
 worker/.env.local
+
+# IDE and cache directories
+.cursor/
+__pycache__/

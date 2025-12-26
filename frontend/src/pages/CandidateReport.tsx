@@ -53,7 +53,6 @@ export default function CandidateReport() {
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [updatingStatus, setUpdatingStatus] = useState(false)
   const { getToken } = useAuth()
   const navigate = useNavigate()
 
@@ -94,37 +93,6 @@ export default function CandidateReport() {
     }
   }
 
-  const updateStatus = async (newStatus: string) => {
-    if (!submissionId || updatingStatus) return
-
-    setUpdatingStatus(true)
-    try {
-      const token = await getToken()
-      const response = await fetch(`${BACKEND_URL}/api/submissions/${submissionId}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ status: newStatus })
-      })
-
-      if (!response.ok) {
-        const errorMessage = await parseApiError(response)
-        throw new Error(errorMessage)
-      }
-
-      // Refresh report data
-      await fetchReport()
-      toast.success(`Status updated to ${newStatus}`)
-    } catch (error) {
-      const errorMessage = handleApiError(error)
-      toast.error(errorMessage)
-      console.error('Failed to update status:', error)
-    } finally {
-      setUpdatingStatus(false)
-    }
-  }
 
   if (loading) {
     return (
@@ -143,10 +111,10 @@ export default function CandidateReport() {
             <div className="flex justify-between h-16 items-center">
               <h1 className="text-2xl font-bold text-gray-900">Candidate Report</h1>
               <Link
-                to={`/interview/${interviewId}/candidates`}
+                to={`/interview/${interviewId}/details`}
                 className="text-blue-600 hover:text-blue-900 font-medium"
               >
-                ← Back to Candidates
+                ← Back to Interview
               </Link>
             </div>
           </div>
@@ -344,37 +312,6 @@ export default function CandidateReport() {
             ) : (
               <p className="text-gray-500">No analysis available for this submission.</p>
             )}
-          </div>
-
-          {/* Action Buttons */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Actions</h2>
-            <div className="flex gap-3">
-              <button
-                onClick={() => updateStatus('accepted')}
-                disabled={updatingStatus}
-                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 flex items-center gap-2"
-              >
-                {updatingStatus && <LoadingSpinner size="sm" />}
-                {updatingStatus ? 'Updating...' : 'Accept'}
-              </button>
-              <button
-                onClick={() => updateStatus('rejected')}
-                disabled={updatingStatus}
-                className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 flex items-center gap-2"
-              >
-                {updatingStatus && <LoadingSpinner size="sm" />}
-                {updatingStatus ? 'Updating...' : 'Reject'}
-              </button>
-              <button
-                onClick={() => updateStatus('scheduled')}
-                disabled={updatingStatus}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 flex items-center gap-2"
-              >
-                {updatingStatus && <LoadingSpinner size="sm" />}
-                {updatingStatus ? 'Updating...' : 'Schedule Interview'}
-              </button>
-            </div>
           </div>
         </div>
       </main>

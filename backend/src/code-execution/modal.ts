@@ -11,20 +11,17 @@ export interface CodeExecutionResponse {
 }
 
 /**
- * Execute code using Modal.com API (or mock for fallback)
+ * Execute code using Modal.com API
  * 
- * Calls the Modal endpoint if MODAL_ENDPOINT is configured,
- * otherwise falls back to mock execution for development/testing.
+ * Requires MODAL_ENDPOINT environment variable to be configured.
  */
 export async function executeCode(
   request: CodeExecutionRequest
 ): Promise<CodeExecutionResponse> {
   const modalEndpoint = process.env.MODAL_ENDPOINT
 
-  // Fall back to mock if Modal endpoint not configured
   if (!modalEndpoint) {
-    console.log('[Code Execution] MODAL_ENDPOINT not set, using mock execution')
-    return mockExecution(request)
+    throw new Error('MODAL_ENDPOINT environment variable is required for code execution')
   }
 
   try {
@@ -76,75 +73,11 @@ export async function executeCode(
     // Log error but don't expose internal details
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('[Code Execution] Modal API call timed out after 30 seconds')
+      throw new Error('Code execution timed out after 30 seconds')
     } else {
       console.error('[Code Execution] Modal API call failed:', error instanceof Error ? error.message : 'Unknown error')
+      throw error
     }
-
-    // Fall back to mock execution
-    console.log('[Code Execution] Falling back to mock execution')
-    return mockExecution(request)
-  }
-}
-
-/**
- * Mock code execution for MVP development
- * Simulates code execution with realistic delays and outputs
- */
-async function mockExecution(
-  request: CodeExecutionRequest
-): Promise<CodeExecutionResponse> {
-  // Simulate execution delay (100-500ms)
-  const delay = Math.random() * 400 + 100
-  await new Promise(resolve => setTimeout(resolve, delay))
-
-  const { code, language } = request
-
-  // Handle empty code
-  if (!code || code.trim().length === 0) {
-    return {
-      output: '',
-      success: true
-    }
-  }
-
-  // Generate mock output based on language
-  let mockOutput = ''
-
-  if (language === 'javascript') {
-    // Try to detect if code would produce output
-    if (code.includes('console.log') || code.includes('console.error')) {
-      mockOutput = 'Hello, World!\nCode executed successfully.\n'
-    } else if (code.includes('return')) {
-      mockOutput = 'Function executed.\n'
-    } else {
-      mockOutput = 'Code executed successfully.\n'
-    }
-  } else if (language === 'python') {
-    // Try to detect if code would produce output
-    if (code.includes('print(')) {
-      mockOutput = 'Hello, World!\nCode executed successfully.\n'
-    } else if (code.includes('return')) {
-      mockOutput = 'Function executed.\n'
-    } else {
-      mockOutput = 'Code executed successfully.\n'
-    }
-  } else if (language === 'c' || language === 'cpp') {
-    if (code.includes('printf') || code.includes('cout')) {
-      mockOutput = 'Hello, World!\nCode executed successfully.\n'
-    } else {
-      mockOutput = 'Code compiled and executed successfully.\n'
-    }
-  } else if (language === 'java') {
-    if (code.includes('System.out.println')) {
-      mockOutput = 'Hello, World!\nCode executed successfully.\n'
-    } else {
-      mockOutput = 'Code compiled and executed successfully.\n'
-    }
-  }
-
-  return {
-    output: mockOutput.trim(),
-    success: true
   }
 }
 

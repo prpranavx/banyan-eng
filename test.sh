@@ -55,6 +55,18 @@ sleep 3
 # Create logs directory
 mkdir -p logs
 
+# Run database migrations before starting services
+echo "🔄 Running database migrations..."
+cd backend
+load_env "../backend/.env"
+if npm run migrate > ../logs/migration.log 2>&1; then
+    echo -e "${GREEN}✅ Migrations completed successfully${NC}"
+else
+    echo -e "${RED}❌ Migration failed. Check logs/migration.log for details${NC}"
+    echo -e "${YELLOW}⚠️  Continuing anyway...${NC}"
+fi
+cd ..
+
 # Start services in background with proper environment variables
 echo "🔨 Starting Backend..."
 cd backend

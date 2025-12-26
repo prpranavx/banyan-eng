@@ -198,7 +198,7 @@ The migration is idempotent and safe to run multiple times.
 - **Database**: PostgreSQL (via Railway or local)
 - **Authentication**: Clerk
 - **AI**: OpenAI GPT-4
-- **Code Execution**: Modal.com (stub implementation)
+- **Code Execution**: Modal.com
 
 ## Development Notes
 
