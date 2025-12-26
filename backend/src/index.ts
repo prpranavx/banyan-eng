@@ -387,12 +387,106 @@ app.post('/api/submissions/:submissionId/submit', async (req, res) => {
     }
 
     // Update submission status to completed
-    // This will also set submitted_at timestamp (handled by updateSubmissionStatus or we can set it explicitly)
     await updateSubmissionStatus(submissionId, 'completed')
+
+    // Trigger evaluation asynchronously (same logic as /api/evaluate)
+    ;(async () => {
+      try {
+        // Check if analysis already exists
+        const existingAnalysis = await getAIAnalysisBySubmission(submission.id)
+        if (existingAnalysis) {
+          console.log('Analysis already exists for submission:', submission.id)
+          return
+        }
+
+        // Get all chat messages for this submission
+        const chatMessages = await getChatMessages(submission.id)
+        const transcript = chatMessages
+          .map(m => `${m.sender.toUpperCase()}: ${m.message}`)
+          .join('\n\n')
+
+        // Include code in evaluation if transcript is short or empty
+        let evaluationPrompt = ''
+        if (transcript.trim().length < 50 && submission.code) {
+          evaluationPrompt = `Analyze this coding interview submission and provide a JSON evaluation with:
+- score (0-100)
+- summary (brief overview)
+- strengths (array of strings)
+- improvements (array of strings)
+
+Candidate Code:
+${submission.code}
+
+Language: ${submission.language || 'Not specified'}
+
+Transcript:
+${transcript || 'No conversation yet'}
+
+Respond with valid JSON only.`
+        } else {
+          evaluationPrompt = `Analyze this coding interview transcript and provide a JSON evaluation with:
+- score (0-100)
+- summary (brief overview)
+- strengths (array of strings)
+- improvements (array of strings)
+
+Transcript:
+${transcript || 'No conversation yet'}
+
+${submission.code ? `Candidate Code:\n${submission.code}\n\nLanguage: ${submission.language || 'Not specified'}` : ''}
+
+Respond with valid JSON only.`
+        }
+
+        console.log('Auto-evaluating submission:', submission.id)
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: evaluationPrompt }],
+          response_format: { type: 'json_object' }
+        })
+
+        const resultText = completion.choices[0]?.message?.content || '{}'
+        let evaluation
+        try {
+          evaluation = JSON.parse(resultText)
+        } catch (parseError) {
+          console.error('Failed to parse evaluation JSON:', resultText)
+          return
+        }
+
+        // Validate evaluation has required fields
+        if (typeof evaluation.score !== 'number' || evaluation.score < 0 || evaluation.score > 100) {
+          console.error('Invalid evaluation score:', evaluation)
+          return
+        }
+        if (!evaluation.summary) {
+          evaluation.summary = 'No summary available'
+        }
+        if (!Array.isArray(evaluation.strengths)) {
+          evaluation.strengths = []
+        }
+        if (!Array.isArray(evaluation.improvements)) {
+          evaluation.improvements = []
+        }
+
+        // Save analysis to database
+        await createAIAnalysis({
+          submission_id: submission.id,
+          score: evaluation.score,
+          summary: evaluation.summary,
+          strengths: evaluation.strengths,
+          improvements: evaluation.improvements
+        })
+
+        console.log('Auto-evaluation completed for submission:', submission.id)
+      } catch (error) {
+        console.error('Error in auto-evaluation:', error)
+      }
+    })()
 
     res.json({ 
       success: true,
-      message: 'Interview submitted successfully'
+      message: 'Interview submitted successfully. Evaluation in progress...'
     })
   } catch (error) {
     console.error('Error in submit interview:', error)
