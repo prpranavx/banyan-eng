@@ -34,7 +34,6 @@ function App() {
     <ErrorBoundary>
       <ClerkProvider 
         publishableKey={clerkPubKey}
-        signOutFallbackRedirectUrl="/"
       >
         <BrowserRouter>
           <Routes>

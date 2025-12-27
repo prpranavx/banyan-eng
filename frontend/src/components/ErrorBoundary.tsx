@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react'
+import { Component, ErrorInfo, ReactNode } from 'react'
 
 interface Props {
   children: ReactNode
@@ -63,7 +63,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="text-gray-600 text-center mb-6">
               We're sorry, but something unexpected happened. Please try reloading the page.
             </p>
-            {this.state.error && process.env.NODE_ENV === 'development' && (
+            {this.state.error && import.meta.env.DEV && (
               <details className="mb-4 p-3 bg-gray-100 rounded text-sm">
                 <summary className="cursor-pointer font-medium text-gray-700 mb-2">
                   Error Details (Development Only)

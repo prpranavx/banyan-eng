@@ -33,7 +33,7 @@ export default function Dashboard() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [deletingInterviewId, setDeletingInterviewId] = useState<string | null>(null)
   const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null)
-  const [plan, setPlan] = useState<'free' | 'pro'>('free')
+  const [plan, setPlan] = useState<'free' | 'pro' | 'enterprise'>('free')
   const [trialExpired, setTrialExpired] = useState(false)
   const [daysUntilTrialExpires, setDaysUntilTrialExpires] = useState<number | null>(null)
   const { getToken } = useAuth()

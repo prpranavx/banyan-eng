@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import Editor from '@monaco-editor/react'
 import toast from 'react-hot-toast'
@@ -59,7 +59,6 @@ export default function CandidateReport() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const { getToken } = useAuth()
-  const navigate = useNavigate()
 
   useEffect(() => {
     if (submissionId) {
