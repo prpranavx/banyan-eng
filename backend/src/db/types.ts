@@ -35,6 +35,11 @@ export interface Submission {
   submitted_at: string
   started_at: string | null
   status: string
+  paste_count: number
+  tab_switch_count: number
+  tab_switch_times: string[]
+  last_activity: string | null
+  suspicious_activity: boolean
 }
 
 export interface ChatMessage {

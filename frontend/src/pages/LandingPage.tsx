@@ -198,7 +198,7 @@ export default function LandingPage() {
             Save your senior engineers' time
           </h2>
           <p className="text-xl text-blue-100 mb-8">
-            Start screening candidates efficiently with job-tailored interviews. 3 free interviews, no credit card required.
+            Start screening candidates efficiently with job-tailored interviews. 2 free interviews, no credit card required.
           </p>
           <SignedOut>
             <SignUpButton mode="modal">

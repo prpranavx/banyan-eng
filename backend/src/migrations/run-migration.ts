@@ -46,6 +46,22 @@ async function runMigration() {
     await db.query(sql004)
     console.log('✅ Migration 004 completed')
 
+    // Run migration 005
+    const migration005Path = join(__dirname, '005_add_anti_cheating_tracking.sql')
+    console.log(`📄 Reading migration file: ${migration005Path}`)
+    const sql005 = readFileSync(migration005Path, 'utf-8')
+    console.log('⚙️  Executing migration 005...')
+    await db.query(sql005)
+    console.log('✅ Migration 005 completed')
+
+    // Run migration 006
+    const migration006Path = join(__dirname, '006_fix_free_credits_to_2.sql')
+    console.log(`📄 Reading migration file: ${migration006Path}`)
+    const sql006 = readFileSync(migration006Path, 'utf-8')
+    console.log('⚙️  Executing migration 006...')
+    await db.query(sql006)
+    console.log('✅ Migration 006 completed')
+
     console.log('✅ All migrations completed successfully!')
     process.exit(0)
   } catch (error) {

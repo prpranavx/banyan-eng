@@ -33,7 +33,7 @@ interface InterviewDetails {
   candidates: Candidate[]
   stats: {
     total: number
-    completed: number
+    suspiciousActivity: number
     averageScore: number | null
   }
 }
@@ -143,28 +143,22 @@ export default function InterviewDetails() {
                 <span className="ml-2 font-medium">{data.stats.total}</span>
               </div>
               <div>
-                <span className="text-gray-500">Completed:</span>
-                <span className="ml-2 font-medium">{data.stats.completed}</span>
+                <span className="text-gray-500">Suspicious Activity:</span>
+                <span className="ml-2 font-medium">{data.stats.suspiciousActivity}</span>
               </div>
             </div>
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="bg-white shadow rounded-lg p-4">
-              <div className="text-sm text-gray-500">Completed</div>
-              <div className="text-2xl font-bold text-gray-900">{data.stats.completed}</div>
+              <div className="text-sm text-gray-500">Suspicious Activity</div>
+              <div className="text-2xl font-bold text-gray-900">{data.stats.suspiciousActivity}</div>
             </div>
             <div className="bg-white shadow rounded-lg p-4">
               <div className="text-sm text-gray-500">Average Score</div>
               <div className="text-2xl font-bold text-gray-900">
                 {data.stats.averageScore !== null ? `${data.stats.averageScore}/100` : 'N/A'}
-              </div>
-            </div>
-            <div className="bg-white shadow rounded-lg p-4">
-              <div className="text-sm text-gray-500">Completion Rate</div>
-              <div className="text-2xl font-bold text-gray-900">
-                {data.stats.total > 0 ? Math.round((data.stats.completed / data.stats.total) * 100) : 0}%
               </div>
             </div>
           </div>

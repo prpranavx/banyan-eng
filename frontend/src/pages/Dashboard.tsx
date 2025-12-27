@@ -18,6 +18,9 @@ interface Session {
   uniqueLink: string
   timeLimitMinutes?: number | null
   timeRemainingSeconds?: number | null
+  pasteCount?: number
+  tabSwitchCount?: number
+  suspiciousActivity?: boolean
 }
 
 export default function Dashboard() {

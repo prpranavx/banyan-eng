@@ -59,14 +59,13 @@ export default function Pricing() {
               <h3 className="text-2xl font-bold text-gray-900 mb-2">Free Trial</h3>
               <div className="mb-6">
                 <span className="text-4xl font-bold text-gray-900">$0</span>
-                <span className="text-gray-600">/forever</span>
               </div>
               <ul className="text-left space-y-4 mb-8 flex-grow">
                 <li className="flex items-start">
                   <svg className="w-6 h-6 text-green-500 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  <span className="text-gray-700">3 interview credits</span>
+                  <span className="text-gray-700">2 interview credits</span>
                 </li>
                 <li className="flex items-start">
                   <svg className="w-6 h-6 text-green-500 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -123,7 +122,7 @@ export default function Pricing() {
             <div className="text-center text-white flex-grow flex flex-col">
               <h3 className="text-2xl font-bold mb-2">Pro</h3>
               <div className="mb-6">
-                <span className="text-4xl font-bold">$29</span>
+                <span className="text-4xl font-bold">$149</span>
                 <span className="text-blue-100">/month</span>
               </div>
               <ul className="text-left space-y-4 mb-8 flex-grow">
@@ -184,8 +183,7 @@ export default function Pricing() {
             <div className="text-center flex-grow flex flex-col">
               <h3 className="text-2xl font-bold text-black mb-2">Enterprise</h3>
               <div className="mb-6">
-                <span className="text-4xl font-bold text-black">$100</span>
-                <span className="text-gray-600">/month</span>
+                {/* Price removed - just Contact Sales button */}
               </div>
               <ul className="text-left space-y-4 mb-8 flex-grow">
                 <li className="flex items-start">

@@ -287,6 +287,51 @@ export async function resetMonthlyCredits(companyId: string): Promise<void> {
   }
 }
 
+// Anti-Cheating Tracking Functions
+
+export async function trackActivity(
+  submissionId: string,
+  eventType: 'paste' | 'tab_switch' | 'visibility_change'
+): Promise<void> {
+  const db = getDb()
+
+  try {
+    const now = new Date().toISOString()
+
+    if (eventType === 'paste') {
+      // Increment paste count and update last activity
+      await db.query(
+        `UPDATE submissions 
+         SET paste_count = paste_count + 1,
+             last_activity = $1,
+             suspicious_activity = CASE 
+               WHEN paste_count + 1 > 5 OR tab_switch_count > 10 THEN true 
+               ELSE suspicious_activity 
+             END
+         WHERE id = $2`,
+        [now, submissionId]
+      )
+    } else if (eventType === 'tab_switch' || eventType === 'visibility_change') {
+      // Increment tab switch count, append timestamp, and update last activity
+      await db.query(
+        `UPDATE submissions 
+         SET tab_switch_count = tab_switch_count + 1,
+             tab_switch_times = tab_switch_times || $1::jsonb,
+             last_activity = $2,
+             suspicious_activity = CASE 
+               WHEN paste_count > 5 OR tab_switch_count + 1 > 10 THEN true 
+               ELSE suspicious_activity 
+             END
+         WHERE id = $3`,
+        [JSON.stringify([now]), now, submissionId]
+      )
+    }
+  } catch (error) {
+    console.error('Error in trackActivity:', error)
+    throw error
+  }
+}
+
 // Submissions Functions
 
 export async function createSubmission(input: CreateSubmissionInput): Promise<Submission> {

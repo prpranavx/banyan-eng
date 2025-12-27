@@ -18,6 +18,11 @@ interface Submission {
   submitted_at: string
   started_at: string | null
   status: string
+  paste_count?: number
+  tab_switch_count?: number
+  tab_switch_times?: string[]
+  last_activity?: string | null
+  suspicious_activity?: boolean
 }
 
 interface ChatMessage {
@@ -212,6 +217,35 @@ export default function CandidateReport() {
                 }`}>
                   {submission.status}
                 </span>
+              </div>
+            </div>
+            {/* Always show Activity Integrity section */}
+            <div className="mt-4 pt-4 border-t border-gray-300">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-medium text-gray-700">Activity Integrity:</span>
+                {submission.suspicious_activity && (
+                  <span className="text-red-600 font-semibold">⚠️ Suspicious Activity Detected</span>
+                )}
+                {!submission.suspicious_activity && (submission.paste_count || 0) === 0 && (submission.tab_switch_count || 0) === 0 && (
+                  <span className="text-green-600 font-semibold text-sm">✓ No issues detected</span>
+                )}
+              </div>
+              <div className="text-sm text-gray-600 space-y-1">
+                <div>Paste events: {submission.paste_count || 0}</div>
+                <div>Tab switches: {submission.tab_switch_count || 0}</div>
+                {submission.tab_switch_times && submission.tab_switch_times.length > 0 && (
+                  <div className="mt-2">
+                    <div className="font-medium text-gray-700 mb-1">Tab switch times:</div>
+                    <div className="text-xs text-gray-500 space-y-1">
+                      {submission.tab_switch_times.slice(0, 5).map((time: string, idx: number) => (
+                        <div key={idx}>{new Date(time).toLocaleString()}</div>
+                      ))}
+                      {submission.tab_switch_times.length > 5 && (
+                        <div>... and {submission.tab_switch_times.length - 5} more</div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

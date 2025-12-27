@@ -1,6 +1,6 @@
 export const PLAN_CONFIG = {
   free: {
-    initialCredits: 3,
+    initialCredits: 2,
     trialDays: 14,
     monthlyCredits: 0 // No monthly reset for free
   },

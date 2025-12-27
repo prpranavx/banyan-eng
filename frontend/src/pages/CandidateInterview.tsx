@@ -48,6 +48,9 @@ export default function CandidateInterview() {
   const [isSubmittingInterview, setIsSubmittingInterview] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const lastActivityTimeRef = useRef<number>(0)
+  const editorRef = useRef<any>(null)
+  const wasVisibleRef = useRef<boolean>(true)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [output, setOutput] = useState<string>('')
   const [executionError, setExecutionError] = useState<string | null>(null)
@@ -431,6 +434,66 @@ export default function CandidateInterview() {
       if (probeTimeoutId) clearTimeout(probeTimeoutId)
     }
   }, [submissionId, showEditor, code, language]) // Trigger on code changes
+
+  // Track activity (paste, tab switch, etc.)
+  const trackActivity = async (eventType: 'paste' | 'tab_switch' | 'visibility_change') => {
+    if (!submissionId) return
+
+    const now = Date.now()
+    // Debounce: max 1 event per second
+    if (now - lastActivityTimeRef.current < 1000) {
+      return
+    }
+    lastActivityTimeRef.current = now
+
+    try {
+      await fetch(`${BACKEND_URL}/api/submissions/${submissionId}/track-activity`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType })
+      })
+    } catch (error) {
+      // Silently fail - don't break interview flow
+      console.error('Failed to track activity:', error)
+    }
+  }
+
+  // Paste detection in Monaco editor
+  useEffect(() => {
+    if (!showEditor || !submissionId || !editorRef.current) return
+
+    const editor = editorRef.current
+    const disposable = editor.onDidPaste(() => {
+      trackActivity('paste')
+    })
+
+    return () => {
+      disposable.dispose()
+    }
+  }, [showEditor, submissionId])
+
+  // Page Visibility API - track tab switching
+  useEffect(() => {
+    if (!showEditor || !submissionId) return
+
+    const handleVisibilityChange = () => {
+      const isVisible = !document.hidden
+      
+      // Only track when tab becomes visible (user switched back)
+      if (isVisible && !wasVisibleRef.current) {
+        trackActivity('tab_switch')
+      }
+      
+      wasVisibleRef.current = isVisible
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    wasVisibleRef.current = !document.hidden
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [showEditor, submissionId])
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -941,6 +1004,9 @@ export default function CandidateInterview() {
                         return
                       }
                       setCode(value || '')
+                    }}
+                    onMount={(editor) => {
+                      editorRef.current = editor
                     }}
                     theme="vs-dark"
                     options={{

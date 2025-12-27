@@ -25,6 +25,7 @@ import {
   getSubmissionsByInterview,
   updateSubmissionCode,
   updateSubmissionStatus,
+  trackActivity,
   addChatMessage,
   getChatMessages,
   createAIAnalysis,
@@ -1140,6 +1141,9 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
         const firstSubmission = submissions.length > 0 ? submissions[0] : null
         let candidateName: string | null = null
         let timeTaken: number | null = null
+        let pasteCount: number = 0
+        let tabSwitchCount: number = 0
+        let suspiciousActivity: boolean = false
 
         if (firstSubmission) {
           candidateName = firstSubmission.candidate_name || null
@@ -1150,6 +1154,11 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
             const submitTime = new Date(firstSubmission.submitted_at).getTime()
             timeTaken = Math.round((submitTime - startTime) / 1000 / 60) // minutes
           }
+
+          // Include cheating metrics
+          pasteCount = firstSubmission.paste_count || 0
+          tabSwitchCount = firstSubmission.tab_switch_count || 0
+          suspiciousActivity = firstSubmission.suspicious_activity || false
         }
 
         return {
@@ -1161,7 +1170,10 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
           status,
           uniqueLink: interview.unique_link,
           timeLimitMinutes: interview.time_limit_minutes,
-          timeRemainingSeconds: timeRemaining
+          timeRemainingSeconds: timeRemaining,
+          pasteCount,
+          tabSwitchCount,
+          suspiciousActivity
         }
       })
     )
@@ -1338,13 +1350,14 @@ app.get('/api/interviews/:interviewId/details', requireAuth, async (req, res) =>
     const averageScore = analysesWithScores.length > 0
       ? Math.round(analysesWithScores.reduce((sum, a) => sum + (a?.score || 0), 0) / analysesWithScores.length)
       : null
+    const suspiciousCount = submissions.filter(s => s.suspicious_activity).length
 
     res.json({
       interview,
       candidates: candidatesWithAnalysis,
       stats: {
         total: submissions.length,
-        completed: completedSubmissions.length,
+        suspiciousActivity: suspiciousCount,
         averageScore
       }
     })
